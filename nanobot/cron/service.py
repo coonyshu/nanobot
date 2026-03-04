@@ -24,7 +24,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
     
     if schedule.kind == "every":
         if not schedule.every_ms or schedule.every_ms <= 0:
-            return None
+            return None 
         # Next interval from now
         return now_ms + schedule.every_ms
     

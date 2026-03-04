@@ -5,10 +5,11 @@ import json_repair
 import os
 import secrets
 import string
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -278,3 +279,145 @@ class LiteLLMProvider(LLMProvider):
     def get_default_model(self) -> str:
         """Get the default model."""
         return self.default_model
+    
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        enable_thinking: bool = True,  # 控制是否启用思考模式
+    ) -> AsyncGenerator[tuple[str | None, str | None, list[ToolCallRequest] | None, str | None], None]:
+        """
+        Stream chat completion responses via LiteLLM.
+        
+        Args:
+            messages: List of message dicts with 'role' and 'content'.
+            tools: Optional list of tool definitions in OpenAI format.
+            model: Model identifier.
+            max_tokens: Maximum tokens in response.
+            temperature: Sampling temperature.
+        
+        Yields:
+            Tuples of (content_chunk, reasoning_chunk, tool_calls, finish_reason)
+            - content_chunk: 最终用户可见的文本块
+            - reasoning_chunk: 思考过程文本块（可选）
+            - tool_calls: List of tool calls if complete
+            - finish_reason: Finish reason if stream ended
+        """
+        original_model = model or self.default_model
+        model = self._resolve_model(original_model)
+
+        if self._supports_cache_control(original_model):
+            messages, tools = self._apply_cache_control(messages, tools)
+
+        max_tokens = max(1, max_tokens)
+        
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": True,
+        }
+        
+        self._apply_model_overrides(model, kwargs)
+        
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        
+        if self.extra_headers:
+            kwargs["extra_headers"] = self.extra_headers
+        
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        
+        # 对于 Qwen 模型，通过 extra_body 传递 enable_thinking 参数
+        if "qwen" in model.lower() or "dashscope" in model.lower():
+            if not enable_thinking:
+                kwargs["extra_body"] = {
+                    "enable_thinking": False,
+                    "chat_template_kwargs": {
+                        "enable_thinking": False
+                    }
+                }
+        
+        try:
+            logger.info(f"[Stream] Starting stream: {model}, enable_thinking={enable_thinking}")
+            response = await acompletion(**kwargs)
+            
+            # 收集工具调用信息
+            tool_call_chunks = {}
+            chunk_count = 0
+            
+            async for chunk in response:
+                chunk_count += 1
+                
+                if not hasattr(chunk, "choices") or len(chunk.choices) == 0:
+                    continue
+                
+                choice = chunk.choices[0]
+                delta = choice.delta
+                finish_reason = choice.finish_reason
+                
+                # 文本内容（区分 reasoning_content 和 content）
+                content = None
+                reasoning = None
+                
+                if hasattr(delta, "content") and delta.content:
+                    # 最终用户可见的内容
+                    content = delta.content
+                
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    # 思考过程（内部推理）
+                    reasoning = delta.reasoning_content
+                
+                # 工具调用（流式的工具调用需要逐块组装）
+                tool_calls_complete = None
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_call_chunks:
+                            tool_call_chunks[idx] = {
+                                "id": getattr(tc_delta, "id", None),
+                                "name": "",
+                                "arguments": "",
+                            }
+                        
+                        if hasattr(tc_delta, "id") and tc_delta.id:
+                            tool_call_chunks[idx]["id"] = tc_delta.id
+                        
+                        if hasattr(tc_delta, "function"):
+                            func = tc_delta.function
+                            if hasattr(func, "name") and func.name:
+                                tool_call_chunks[idx]["name"] += func.name
+                            if hasattr(func, "arguments") and func.arguments:
+                                tool_call_chunks[idx]["arguments"] += func.arguments
+                
+                # 如果流结束且有工具调用，解析工具调用
+                if finish_reason and tool_call_chunks:
+                    tool_calls_complete = []
+                    for tc_data in tool_call_chunks.values():
+                        try:
+                            args = json_repair.loads(tc_data["arguments"])
+                        except:
+                            args = {}
+                        
+                        tool_calls_complete.append(ToolCallRequest(
+                            id=tc_data["id"] or _short_tool_id(),
+                            name=tc_data["name"],
+                            arguments=args,
+                        ))
+                
+                yield (content, reasoning, tool_calls_complete, finish_reason)
+            
+            logger.info(f"[Stream] Stream completed, total chunks: {chunk_count}")
+                        
+        except Exception as e:
+            logger.error(f"[Stream] Error in chat_stream: {e}")
+            yield (f"Error calling LLM: {str(e)}", None, "error")

@@ -22,6 +22,7 @@ class SkillsLoader:
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self.additional_skills_dirs: list[Path] = []  # Extra dirs checked between workspace and builtin
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -42,6 +43,15 @@ class SkillsLoader:
                     skill_file = skill_dir / "SKILL.md"
                     if skill_file.exists():
                         skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "workspace"})
+        
+        # Additional skills directories (e.g. global base skills)
+        for extra_dir in self.additional_skills_dirs:
+            if extra_dir.exists():
+                for skill_dir in extra_dir.iterdir():
+                    if skill_dir.is_dir():
+                        skill_file = skill_dir / "SKILL.md"
+                        if skill_file.exists() and not any(s["name"] == skill_dir.name for s in skills):
+                            skills.append({"name": skill_dir.name, "path": str(skill_file), "source": "additional"})
         
         # Built-in skills
         if self.builtin_skills and self.builtin_skills.exists():
@@ -70,6 +80,12 @@ class SkillsLoader:
         workspace_skill = self.workspace_skills / name / "SKILL.md"
         if workspace_skill.exists():
             return workspace_skill.read_text(encoding="utf-8")
+        
+        # Check additional skills directories
+        for extra_dir in self.additional_skills_dirs:
+            extra_skill = extra_dir / name / "SKILL.md"
+            if extra_skill.exists():
+                return extra_skill.read_text(encoding="utf-8")
         
         # Check built-in
         if self.builtin_skills:

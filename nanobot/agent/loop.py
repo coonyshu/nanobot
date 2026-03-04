@@ -125,15 +125,24 @@ class AgentLoop:
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
+        logger.info(f"_connect_mcp called: connected={self._mcp_connected}, connecting={self._mcp_connecting}, servers={bool(self._mcp_servers)}")
+        
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
+            logger.info(f"_connect_mcp skipped (already connected or connecting or no servers)")
             return
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
+            # 添加超时保护，防止 MCP 服务器不可用时卡住
+            await asyncio.wait_for(
+                connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack),
+                timeout=10.0  # 10秒超时
+            )
             self._mcp_connected = True
+        except asyncio.TimeoutError:
+            logger.error("MCP servers connection timeout (10s), continuing without MCP tools")
         except Exception as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
@@ -173,62 +182,157 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        
+        # 调试：打印可用工具列表
+        available_tools = [t.name for t in self.tools._tools.values()]
+        logger.info(f"Available tools for this turn: {', '.join(available_tools)}")
+        
+        # 调试：检查 cron 工具的描述
+        if 'cron' in available_tools:
+            cron_tool = self.tools._tools.get('cron')
+            if cron_tool:
+                logger.info(f"cron tool description: {cron_tool.description}")
 
         while iteration < self.max_iterations:
             iteration += 1
-
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-
-            if response.has_tool_calls:
-                if on_progress:
-                    clean = self._strip_think(response.content)
-                    if clean:
-                        await on_progress(clean)
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
-
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+            
+            # 永远使用流式（如果支持）
+            use_streaming = on_stream is not None and hasattr(self.provider, 'chat_stream')
+            logger.debug(f"[Stream] use_streaming={use_streaming}, on_stream={on_stream is not None}, has_chat_stream={hasattr(self.provider, 'chat_stream')}")
+            
+            if use_streaming:
+                # 流式模式：支持工具调用检测
+                logger.info("[Stream] Using streaming mode")
+                collected_content = ""
+                collected_reasoning = ""  # 收集思考过程
+                collected_tool_calls = None
+                is_first_chunk = True
+                
+                # 检查是否需要启用思考模式（从 on_stream 回调中获取）
+                enable_thinking = getattr(on_stream, 'enable_thinking', True)
+                
+                async for content_chunk, reasoning_chunk, tool_calls, finish_reason in self.provider.chat_stream(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    enable_thinking=enable_thinking,
+                ):  
+                    # 思考过程实时发送
+                    if reasoning_chunk and on_stream:
+                        collected_reasoning += reasoning_chunk
+                        # 发送思考过程到前端（使用 reasoning 参数）
+                        await on_stream(reasoning_chunk, is_first=is_first_chunk, reasoning=True)
+                        logger.debug(f"[Stream] Sent reasoning chunk: {reasoning_chunk[:30]}...")
+                    
+                    # 文本块实时发送
+                    if content_chunk and on_stream:
+                        logger.debug(f"[Stream] Got chunk: {content_chunk[:30]}...")
+                        collected_content += content_chunk
+                        await on_stream(content_chunk, is_first=is_first_chunk, reasoning=False)
+                        is_first_chunk = False
+                    
+                    # 工具调用检测
+                    if tool_calls:
+                        logger.debug(f"[Stream] Got tool calls: {len(tool_calls)}")
+                        collected_tool_calls = tool_calls
+                
+                # 处理结果
+                if collected_tool_calls:
+                    # 有工具调用
+                    if on_progress:
+                        clean = self._strip_think(collected_content)
+                        if clean:
+                            await on_progress(clean)
+                        await on_progress(self._tool_hint(collected_tool_calls), tool_hint=True)
+                    
+                    tool_call_dicts = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+                            }
                         }
-                    }
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts,
-                    reasoning_content=response.reasoning_content,
-                )
-
-                for tool_call in response.tool_calls:
-                    tools_used.append(tool_call.name)
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
+                        for tc in collected_tool_calls
+                    ]
+                    messages = self.context.add_assistant_message(
+                        messages, collected_content, tool_call_dicts,
                     )
+                    
+                    for tool_call in collected_tool_calls:
+                        tools_used.append(tool_call.name)
+                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                        logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        messages = self.context.add_tool_result(
+                            messages, tool_call.id, tool_call.name, result
+                        )
+                else:
+                    # 没有工具调用，直接返回
+                    clean = self._strip_think(collected_content)
+                    messages = self.context.add_assistant_message(messages, clean)
+                    final_content = clean
+                    break
             else:
-                clean = self._strip_think(response.content)
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
+                # 非流式模式（后备）
+                response = await self.provider.chat(
+                    messages=messages,
+                    tools=self.tools.get_definitions(),
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
                 )
-                final_content = clean
-                break
+                
+                if not response.has_tool_calls:
+                    # 没有工具调用，直接返回
+                    clean = self._strip_think(response.content)
+                    messages = self.context.add_assistant_message(
+                        messages, clean, reasoning_content=response.reasoning_content,
+                    )
+                    final_content = clean
+                    break
+                else:
+                    # 有工具调用，执行工具
+                    if on_progress:
+                        clean = self._strip_think(response.content)
+                        if clean:
+                            await on_progress(clean)
+                        await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+
+                    tool_call_dicts = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+                            }
+                        }
+                        for tc in response.tool_calls
+                    ]
+                    messages = self.context.add_assistant_message(
+                        messages, response.content, tool_call_dicts,
+                        reasoning_content=response.reasoning_content,
+                    )
+
+                    for tool_call in response.tool_calls:
+                        tools_used.append(tool_call.name)
+                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                        logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                        messages = self.context.add_tool_result(
+                            messages, tool_call.id, tool_call.name, result
+                        )
 
         if final_content is None and iteration >= self.max_iterations:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
@@ -315,24 +419,45 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+        user_workspace: Path | None = None,
     ) -> OutboundMessage | None:
-        """Process a single inbound message and return the response."""
+        """Process a single inbound message and return the response.
+        
+        Args:
+            user_workspace: If provided, use per-user SessionManager and MemoryStore
+                           for session/memory isolation.
+        """
+        # Resolve session manager: per-user or shared
+        if user_workspace:
+            _user_sessions = SessionManager(user_workspace)
+        else:
+            _user_sessions = self.sessions
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
+            session = _user_sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
-            messages = self.context.build_messages(
-                history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
-            )
+            if user_workspace:
+                _user_context = ContextBuilder(user_workspace)
+                _user_context.skills = self.context.skills
+                messages = _user_context.build_messages(
+                    history=history,
+                    current_message=msg.content, channel=channel, chat_id=chat_id,
+                )
+            else:
+                messages = self.context.build_messages(
+                    history=history,
+                    current_message=msg.content, channel=channel, chat_id=chat_id,
+                )
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
+            _user_sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -340,7 +465,7 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        session = _user_sessions.get_or_create(key)
 
         # Slash commands
         cmd = msg.content.strip().lower()
@@ -353,7 +478,8 @@ class AgentLoop:
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
+                        if not await self._consolidate_memory(temp, archive_all=True,
+                                                              workspace_override=user_workspace):
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
@@ -370,8 +496,8 @@ class AgentLoop:
                     self._consolidation_locks.pop(session.key, None)
 
             session.clear()
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
+            _user_sessions.save(session)
+            _user_sessions.invalidate(session.key)
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
                                   content="New session started.")
         if cmd == "/help":
@@ -386,7 +512,8 @@ class AgentLoop:
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        await self._consolidate_memory(session,
+                                                       workspace_override=user_workspace)
                 finally:
                     self._consolidating.discard(session.key)
                     if not lock.locked():
@@ -404,12 +531,22 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
-        )
+        if user_workspace:
+            _user_context = ContextBuilder(user_workspace)
+            _user_context.skills = self.context.skills
+            initial_messages = _user_context.build_messages(
+                history=history,
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=msg.channel, chat_id=msg.chat_id,
+            )
+        else:
+            initial_messages = self.context.build_messages(
+                history=history,
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=msg.channel, chat_id=msg.chat_id,
+            )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -420,14 +557,14 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, on_progress=on_progress or _bus_progress, on_stream=on_stream,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
         self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
+        _user_sessions.save(session)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -461,9 +598,11 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(self, session, archive_all: bool = False,
+                                   workspace_override: Path | None = None) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace).consolidate(
+        ws = workspace_override or self.workspace
+        return await MemoryStore(ws).consolidate(
             session, self.provider, self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
@@ -475,9 +614,28 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+        user_workspace: Path | None = None,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
-        await self._connect_mcp()
+        """Process a message directly (for CLI or cron usage).
+        
+        Args:
+            user_workspace: If provided, use this path for per-user session/memory
+                           isolation instead of the AgentLoop's workspace.
+        """
+        logger.info(f"process_direct started: channel={channel}, chat_id={chat_id}, content={content[:50]}...")
+        
+        # 为 MCP 连接添加超时保护，防止整个消息处理卡死
+        try:
+            await asyncio.wait_for(self._connect_mcp(), timeout=15.0)
+        except asyncio.TimeoutError:
+            logger.error("MCP connection timeout (15s), continuing without MCP")
+        except Exception as e:
+            logger.error("MCP connection error: {}", e)
+        
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
+        response = await self._process_message(
+            msg, session_key=session_key, on_progress=on_progress, on_stream=on_stream,
+            user_workspace=user_workspace,
+        )
         return response.content if response else ""

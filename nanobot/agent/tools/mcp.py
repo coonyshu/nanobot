@@ -59,8 +59,11 @@ async def connect_mcp_servers(
     """Connect to configured MCP servers and register their tools."""
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
+    
+    logger.info(f"connect_mcp_servers started, {len(mcp_servers)} servers to connect")
 
     for name, cfg in mcp_servers.items():
+        logger.info(f"Attempting to connect to MCP server '{name}': url={cfg.url if hasattr(cfg, 'url') else None}")
         try:
             if cfg.command:
                 params = StdioServerParameters(
@@ -69,18 +72,30 @@ async def connect_mcp_servers(
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif cfg.url:
                 from mcp.client.streamable_http import streamable_http_client
-                # Always provide an explicit httpx client so MCP HTTP transport does not
-                # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
+                import asyncio
+                
+                # 添加 httpx 客户端超时，防止 MCP 服务器不可用时卡住
                 http_client = await stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=httpx.Timeout(10.0, connect=5.0),  # 总超时10秒，连接超时5秒
                     )
                 )
-                read, write, _ = await stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
+                
+                # 为 streamable_http_client 连接添加超时保护（5秒）
+                logger.info(f"Connecting to MCP server '{name}' at {cfg.url}...")
+                try:
+                    read, write, _ = await asyncio.wait_for(
+                        stack.enter_async_context(
+                            streamable_http_client(cfg.url, http_client=http_client)
+                        ),
+                        timeout=5.0
+                    )
+                    logger.info(f"Successfully connected to MCP server '{name}'")
+                except asyncio.TimeoutError:
+                    logger.error(f"MCP server '{name}': connection timeout (5s)")
+                    continue
             else:
                 logger.warning("MCP server '{}': no command or url configured, skipping", name)
                 continue

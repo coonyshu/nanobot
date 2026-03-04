@@ -1,6 +1,7 @@
 """Context builder for assembling agent prompts."""
 
 import base64
+import json
 import mimetypes
 import platform
 import time
@@ -141,7 +142,44 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         self, messages: list[dict[str, Any]],
         tool_call_id: str, tool_name: str, result: str,
     ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list."""
+        """
+        Add a tool result to the message list.
+        
+        Supports multimodal content (text + images).
+        If result is JSON with __multimodal__=true, extract image_b64 and format as vision content.
+        """
+        # 尝试解析为 JSON，检查是否是多模态内容
+        try:
+            result_data = json.loads(result)
+            if isinstance(result_data, dict) and result_data.get("__multimodal__"):
+                # 多模态内容：构建图文混合格式
+                text_content = result_data.get("text", "操作完成")
+                image_b64 = result_data.get("image_b64", "")
+                mime_type = result_data.get("mime_type", "image/jpeg")
+                
+                if image_b64:
+                    # 使用 OpenAI vision 格式：[{type: "text", text: ...}, {type: "image_url", image_url: {...}}]
+                    content = [
+                        {"type": "text", "text": text_content},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_b64}"
+                            }
+                        }
+                    ]
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "name": tool_name,
+                        "content": content
+                    })
+                    return messages
+        except (json.JSONDecodeError, TypeError, KeyError):
+            # 不是 JSON 或解析失败，按普通文本处理
+            pass
+        
+        # 普通文本结果
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
     

@@ -15,6 +15,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
+from nanobot.agent.tools.message import MessageTool
 
 
 class SubagentManager:
@@ -88,7 +89,7 @@ class SubagentManager:
         logger.info("Subagent [{}] starting task: {}", task_id, label)
         
         try:
-            # Build subagent tools (no message tool, no spawn tool)
+            # Build subagent tools (including message tool for notifications)
             tools = ToolRegistry()
             allowed_dir = self.workspace if self.restrict_to_workspace else None
             tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
@@ -103,6 +104,16 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
+            
+            # 添加 message 工具，使 subagent 能够发送消息（用于提醒等场景）
+            # 从 origin 中获取 channel 和 chat_id
+            channel = origin.get("channel", "")
+            chat_id = origin.get("chat_id", "")
+            tools.register(MessageTool(
+                send_callback=self.bus.publish_outbound,
+                default_channel=channel,
+                default_chat_id=chat_id,
+            ))
             
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
@@ -149,8 +160,9 @@ class SubagentManager:
                     # Execute tools
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                        logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
+                        logger.info("Subagent [{}] executing tool: {}({})", task_id, tool_call.name, args_str[:200])
                         result = await tools.execute(tool_call.name, tool_call.arguments)
+                        logger.info("Subagent [{}] tool result: {}", task_id, result[:200] if isinstance(result, str) else result)
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -208,13 +220,19 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         """Build a focused system prompt for the subagent."""
         from datetime import datetime
         import time as _time
+        import platform as _platform
+        
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         tz = _time.strftime("%Z") or "UTC"
+        os_name = _platform.system()  # 'Windows', 'Linux', 'Darwin' (macOS)
 
         return f"""# Subagent
 
 ## Current Time
 {now} ({tz})
+
+## Operating System
+{os_name}
 
 You are a subagent spawned by the main agent to complete a specific task.
 
@@ -226,14 +244,22 @@ You are a subagent spawned by the main agent to complete a specific task.
 
 ## What You Can Do
 - Read and write files in the workspace
-- Execute shell commands
+- Execute shell commands (including sleep for delays)
 - Search the web and fetch web pages
+- Send messages to users via message tool (for notifications, reminders, etc.)
 - Complete the task thoroughly
 
 ## What You Cannot Do
-- Send messages directly to users (no message tool available)
 - Spawn other subagents
 - Access the main agent's conversation history
+
+## For Time-Delayed Tasks
+If your task requires waiting (e.g., "remind in 1 minute"):
+1. Use `exec` with appropriate command based on OS:
+   - Windows: `timeout /t <seconds> /nobreak` (e.g., timeout /t 60 /nobreak for 1 minute)
+   - Linux/Mac: `sleep <seconds>` (e.g., sleep 60 for 1 minute)
+2. After the delay completes, use `message` tool to send the notification
+3. channel and chat_id are already set as defaults, just provide content
 
 ## Workspace
 Your workspace is at: {self.workspace}
