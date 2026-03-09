@@ -80,7 +80,20 @@ async def connect_mcp_servers(
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
 
+    logger.info("connect_mcp_servers started, {} servers to connect", len(mcp_servers))
+
     for name, cfg in mcp_servers.items():
+        # Normalise: tenant config may provide raw dicts instead of MCPServerConfig
+        if isinstance(cfg, dict):
+            from nanobot.config.schema import MCPServerConfig
+            cfg = MCPServerConfig(
+                command=cfg.get("command", ""),
+                args=cfg.get("args", []),
+                env=cfg.get("env", {}),
+                url=cfg.get("url", ""),
+                headers=cfg.get("headers", {}),
+                tool_timeout=cfg.get("toolTimeout", cfg.get("tool_timeout", 30)),
+            )
         try:
             transport_type = cfg.type
             if not transport_type:
@@ -94,6 +107,8 @@ async def connect_mcp_servers(
                 else:
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
                     continue
+
+            logger.info("Connecting to MCP server '{}' (transport={})", name, transport_type)
 
             if transport_type == "stdio":
                 params = StdioServerParameters(
@@ -114,21 +129,27 @@ async def connect_mcp_servers(
                         auth=auth,
                     )
 
-                read, write = await stack.enter_async_context(
-                    sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
+                read, write = await asyncio.wait_for(
+                    stack.enter_async_context(
+                        sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
+                    ),
+                    timeout=5.0,
                 )
             elif transport_type == "streamableHttp":
-                # Always provide an explicit httpx client so MCP HTTP transport does not
+                # Explicit httpx client with timeout so MCP HTTP transport does not
                 # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
                 http_client = await stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
                         follow_redirects=True,
-                        timeout=None,
+                        timeout=httpx.Timeout(10.0, connect=5.0),
                     )
                 )
-                read, write, _ = await stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
+                read, write, _ = await asyncio.wait_for(
+                    stack.enter_async_context(
+                        streamable_http_client(cfg.url, http_client=http_client)
+                    ),
+                    timeout=5.0,
                 )
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
@@ -144,5 +165,7 @@ async def connect_mcp_servers(
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
             logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+        except asyncio.TimeoutError:
+            logger.error("MCP server '{}': connection timed out, skipping", name)
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)

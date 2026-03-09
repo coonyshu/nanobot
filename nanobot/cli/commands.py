@@ -291,6 +291,10 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    web_port: int = typer.Option(0, "--web-port", "-w", help="Web service port (overrides config)"),
+    https: bool = typer.Option(None, "--https/--no-https", help="Enable HTTPS (overrides config)"),
+    ssl_cert: str = typer.Option("", "--ssl-cert", help="SSL certificate file path (overrides config)"),
+    ssl_key: str = typer.Option("", "--ssl-key", help="SSL key file path (overrides config)"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
