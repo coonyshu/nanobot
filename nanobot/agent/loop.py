@@ -110,6 +110,10 @@ class AgentLoop:
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._processing_lock = asyncio.Lock()
+        
+        # Workflow Agent mode state per session
+        self._workflow_mode: dict[str, dict] = {}  # session_key -> {runner, task_id, current_node}
+        
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -129,25 +133,43 @@ class AgentLoop:
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+        
+        # Register Workflow Agent tools and wire up the ToolRegistry so the
+        # runner can invoke MCP / frontend tools via the same registry.
+        try:
+            from nanobot.agents.workflow_agent.tools import (
+                register_tools as register_workflow_tools,
+                set_tool_registry as set_workflow_registry,
+            )
+            register_workflow_tools(self.tools)
+            set_workflow_registry(self.tools)
+            logger.info("Workflow Agent tools registered and registry wired")
+        except Exception as e:
+            logger.warning(f"Failed to register Workflow Agent tools: {e}")
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
-        logger.info(f"_connect_mcp called: connected={self._mcp_connected}, connecting={self._mcp_connecting}, servers={bool(self._mcp_servers)}")
-        
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
-            logger.info(f"_connect_mcp skipped (already connected or connecting or no servers)")
             return
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            # 添加超时保护，防止 MCP 服务器不可用时卡住
+            # Add timeout to avoid blocking when MCP server is unavailable
             await asyncio.wait_for(
                 connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack),
-                timeout=10.0  # 10秒超时
+                timeout=10.0
             )
             self._mcp_connected = True
+            # Hide workflow-internal tools from LLM — they are only callable by WorkflowRunner.
+            # This forces the LLM to use workflow_* tools exclusively for inspection tasks.
+            self.tools.hide_pattern_from_llm("mcp_workflow-engine_")
+            # work_form_* manipulation tools: only the status query is left visible
+            for _t in ("work_form_open_form", "work_form_update_node_status",
+                       "work_form_update_node_fields", "work_form_close_form"):
+                self.tools.hide_from_llm(_t)
+            logger.info("Workflow-internal tools hidden from LLM (still callable internally)")
         except asyncio.TimeoutError:
             logger.error("MCP servers connection timeout (10s), continuing without MCP tools")
         except Exception as e:
@@ -190,132 +212,15 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-        on_stream: Callable[[str], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
-        
-        # 调试：打印可用工具列表
-        available_tools = [t.name for t in self.tools._tools.values()]
-        logger.info(f"Available tools for this turn: {', '.join(available_tools)}")
-        
-        # 调试：检查 cron 工具的描述
-        if 'cron' in available_tools:
-            cron_tool = self.tools._tools.get('cron')
-            if cron_tool:
-                logger.info(f"cron tool description: {cron_tool.description}")
 
         while iteration < self.max_iterations:
             iteration += 1
-            
-            # 永远使用流式（如果支持）
-            use_streaming = on_stream is not None and hasattr(self.provider, 'chat_stream')
-            logger.debug(f"[Stream] use_streaming={use_streaming}, on_stream={on_stream is not None}, has_chat_stream={hasattr(self.provider, 'chat_stream')}")
-            
-            if use_streaming:
-                # 流式模式：支持工具调用检测
-                logger.info("[Stream] Using streaming mode")
-                collected_content = ""
-                collected_reasoning = ""  # 收集思考过程
-                collected_tool_calls = None
-                is_first_chunk = True
-                
-                # 检查是否需要启用思考模式（从 on_stream 回调中获取）
-                enable_thinking = getattr(on_stream, 'enable_thinking', True)
-                
-                async for content_chunk, reasoning_chunk, tool_calls, finish_reason in self.provider.chat_stream(
-                    messages=messages,
-                    tools=self.tools.get_definitions(),
-                    model=self.model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    enable_thinking=enable_thinking,
-                ):  
-                    # 思考过程实时发送
-                    if reasoning_chunk and on_stream:
-                        collected_reasoning += reasoning_chunk
-                        # 发送思考过程到前端（使用 reasoning 参数）
-                        await on_stream(reasoning_chunk, is_first=is_first_chunk, reasoning=True)
-                        logger.debug(f"[Stream] Sent reasoning chunk: {reasoning_chunk[:30]}...")
-                    
-                    # 文本块实时发送
-                    if content_chunk and on_stream:
-                        logger.debug(f"[Stream] Got chunk: {content_chunk[:30]}...")
-                        collected_content += content_chunk
-                        await on_stream(content_chunk, is_first=is_first_chunk, reasoning=False)
-                        is_first_chunk = False
-                    
-                    # 工具调用检测
-                    if tool_calls:
-                        logger.debug(f"[Stream] Got tool calls: {len(tool_calls)}")
-                        collected_tool_calls = tool_calls
-                
-                # 处理结果
-                if collected_tool_calls:
-                    # 有工具调用
-                    if on_progress:
-                        clean = self._strip_think(collected_content)
-                        if clean:
-                            await on_progress(clean)
-                        await on_progress(self._tool_hint(collected_tool_calls), tool_hint=True)
-                    
-                    tool_call_dicts = [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-                            }
-                        }
-                        for tc in collected_tool_calls
-                    ]
-                    messages = self.context.add_assistant_message(
-                        messages, collected_content, tool_call_dicts,
-                    )
-                    
-                    for tool_call in collected_tool_calls:
-                        tools_used.append(tool_call.name)
-                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                        logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                        messages = self.context.add_tool_result(
-                            messages, tool_call.id, tool_call.name, result
-                        )
-                else:
-                    # 没有工具调用，直接返回
-                    clean = self._strip_think(collected_content)
-                    messages = self.context.add_assistant_message(messages, clean)
-                    final_content = clean
-                    break
-            else:
-                # 非流式模式（后备）
-                response = await self.provider.chat(
-                    messages=messages,
-                    tools=self.tools.get_definitions(),
-                    model=self.model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                )
-                
-                if not response.has_tool_calls:
-                    # 没有工具调用，直接返回
-                    clean = self._strip_think(response.content)
-                    messages = self.context.add_assistant_message(
-                        messages, clean, reasoning_content=response.reasoning_content,
-                    )
-                    final_content = clean
-                    break
-                else:
-                    # 有工具调用，执行工具
-                    if on_progress:
-                        clean = self._strip_think(response.content)
-                        if clean:
-                            await on_progress(clean)
-                        await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
             response = await self.provider.chat(
                 messages=messages,
@@ -333,21 +238,6 @@ class AgentLoop:
                         await on_progress(clean)
                     await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
 
-                    tool_call_dicts = [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-                            }
-                        }
-                        for tc in response.tool_calls
-                    ]
-                    messages = self.context.add_assistant_message(
-                        messages, response.content, tool_call_dicts,
-                        reasoning_content=response.reasoning_content,
-                    )
                 tool_call_dicts = [
                     {
                         "id": tc.id,
@@ -385,6 +275,106 @@ class AgentLoop:
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
+                final_content = clean
+                break
+
+        if final_content is None and iteration >= self.max_iterations:
+            logger.warning("Max iterations ({}) reached", self.max_iterations)
+            final_content = (
+                f"I reached the maximum number of tool call iterations ({self.max_iterations}) "
+                "without completing the task. You can try breaking the task into smaller steps."
+            )
+
+        return final_content, tools_used, messages
+
+    async def _run_agent_loop_streaming(
+        self,
+        initial_messages: list[dict],
+        on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+    ) -> tuple[str | None, list[str], list[dict]]:
+        """Streaming agent loop — custom extension, not in upstream.
+
+        Streams LLM tokens via ``provider.chat_stream`` while still supporting
+        tool calls.  Each iteration:
+          1. Collects streamed chunks, forwarding text/reasoning to ``on_stream``.
+          2. If tool calls arrive, executes them and continues to the next LLM turn.
+          3. If no tool calls, ends the loop and returns the accumulated content.
+        """
+        messages = initial_messages
+        iteration = 0
+        final_content = None
+        tools_used: list[str] = []
+        finish_reason: str | None = None
+
+        # Allow the caller to opt-in to thinking/reasoning mode via a marker
+        # attribute on the callback (set by the voice/WS integration layer).
+        enable_thinking = getattr(on_stream, 'enable_thinking', True)
+
+        while iteration < self.max_iterations:
+            iteration += 1
+
+            collected_content = ""
+            collected_tool_calls = None
+            is_first_chunk = True
+
+            async for content_chunk, reasoning_chunk, tool_calls, finish_reason in self.provider.chat_stream(
+                messages=messages,
+                tools=self.tools.get_definitions(),
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                enable_thinking=enable_thinking,
+            ):
+                if reasoning_chunk and on_stream:
+                    await on_stream(reasoning_chunk, is_first=is_first_chunk, reasoning=True)
+
+                if content_chunk and on_stream:
+                    collected_content += content_chunk
+                    await on_stream(content_chunk, is_first=is_first_chunk, reasoning=False)
+                    is_first_chunk = False
+
+                if tool_calls:
+                    collected_tool_calls = tool_calls
+
+            if collected_tool_calls:
+                # Tool calls: append to messages and loop for next LLM turn.
+                if on_progress:
+                    clean = self._strip_think(collected_content)
+                    if clean:
+                        await on_progress(clean)
+                    await on_progress(self._tool_hint(collected_tool_calls), tool_hint=True)
+
+                tool_call_dicts = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+                        }
+                    }
+                    for tc in collected_tool_calls
+                ]
+                messages = self.context.add_assistant_message(
+                    messages, collected_content, tool_call_dicts,
+                )
+                for tool_call in collected_tool_calls:
+                    tools_used.append(tool_call.name)
+                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+                    logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    messages = self.context.add_tool_result(
+                        messages, tool_call.id, tool_call.name, result
+                    )
+                continue
+            else:
+                clean = self._strip_think(collected_content)
+                if finish_reason == "error":
+                    logger.error("LLM stream returned error: {}", (clean or "")[:200])
+                    final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    break
+                messages = self.context.add_assistant_message(messages, clean)
                 final_content = clean
                 break
 
@@ -606,9 +596,15 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress, on_stream=on_stream,
-        )
+        _progress = on_progress or _bus_progress
+        if on_stream is not None and hasattr(self.provider, 'chat_stream'):
+            final_content, _, all_msgs = await self._run_agent_loop_streaming(
+                initial_messages, on_progress=_progress, on_stream=on_stream,
+            )
+        else:
+            final_content, _, all_msgs = await self._run_agent_loop(
+                initial_messages, on_progress=_progress,
+            )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."

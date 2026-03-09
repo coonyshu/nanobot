@@ -16,7 +16,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import MochatConfig
-from nanobot.utils.helpers import get_data_path
+from nanobot.utils.helpers import get_tenant_data_path
 
 try:
     import socketio
@@ -224,7 +224,7 @@ class MochatChannel(BaseChannel):
         self._socket: Any = None
         self._ws_connected = self._ws_ready = False
 
-        self._state_dir = get_data_path() / "mochat"
+        self._state_dir = get_tenant_data_path("default") / "mochat"
         self._cursor_path = self._state_dir / "session_cursors.json"
         self._session_cursor: dict[str, int] = {}
         self._cursor_save_task: asyncio.Task | None = None

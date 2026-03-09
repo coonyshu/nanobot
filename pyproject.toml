@@ -51,6 +51,19 @@ matrix = [
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
 ]
+serve = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "python-dotenv>=1.0.0",
+    "PyJWT>=2.8.0",
+    "bcrypt>=4.0.0",
+    "python-multipart>=0.0.6",
+]
+voice = [
+    "opuslib-next>=3.0.1",
+    "numpy>=1.21.0",
+    "onnxruntime>=1.15.0",
+]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
@@ -77,6 +90,12 @@ include = [
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/serve/**/*.py",
+    "nanobot/multi_tenant/**/*.py",
+    "nanobot/voice/**/*.py",
+    "nanobot/service_tools/**/*.py",
+    "nanobot/static/**/*",
+    "nanobot/data/**/*",
 ]
 
 [tool.hatch.build.targets.sdist]

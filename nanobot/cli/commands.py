@@ -19,7 +19,7 @@ from rich.text import Text
 
 from nanobot import __logo__, __version__
 from nanobot.config.schema import Config
-from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.helpers import sync_workspace_templates, get_data_path, get_user_data_path
 
 app = typer.Typer(
     name="nanobot",
@@ -87,7 +87,7 @@ def _init_prompt_session() -> None:
     except Exception:
         pass
 
-    history_file = Path.home() / ".nanobot" / "history" / "cli_history"
+    history_file = get_data_path() / "history" / "cli_history"
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     _PROMPT_SESSION = PromptSession(
@@ -189,7 +189,7 @@ def onboard():
 
     console.print(f"\n{__logo__} nanobot is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.nanobot/config.json[/cyan]")
+    console.print("  1. Add your API key to [cyan]~/.nanobots/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print("  2. Chat: [cyan]nanobot agent -m \"Hello!\"[/cyan]")
     console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
@@ -224,7 +224,7 @@ def _make_provider(config: Config):
     spec = find_by_name(provider_name)
     if not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
         console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.nanobot/config.json under providers section")
+        console.print("Set one in ~/.nanobots/config.json under providers section")
         raise typer.Exit(1)
 
     return LiteLLMProvider(
@@ -244,6 +244,10 @@ def _make_provider(config: Config):
 @app.command()
 def gateway(
     port: int = typer.Option(18790, "--port", "-p", help="Gateway port"),
+    web_port: int = typer.Option(0, "--web-port", "-w", help="Web service port (overrides config)"),
+    https: bool = typer.Option(None, "--https/--no-https", help="Enable HTTPS (overrides config)"),
+    ssl_cert: str = typer.Option("", "--ssl-cert", help="SSL certificate file path (overrides config)"),
+    ssl_key: str = typer.Option("", "--ssl-key", help="SSL key file path (overrides config)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the nanobot gateway."""
@@ -269,7 +273,7 @@ def gateway(
     session_manager = SessionManager(config.workspace_path)
 
     # Create cron service first (callback set after agent creation)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron_store_path = get_user_data_path() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
@@ -403,13 +407,70 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
+
+            tasks = [
                 agent.run(),
                 channels.start_all(),
-            )
+            ]
+
+            # Optionally start the Web service alongside channels
+            uvi_server = None
+            web_cfg = config.gateway.web
+            effective_web_port = web_port if web_port > 0 else web_cfg.port
+            if effective_web_port > 0:
+                try:
+                    from nanobot.serve.app import create_app
+                    import uvicorn
+
+                    web_app = create_app(
+                        agent_loop=agent,
+                        bus=bus,
+                        provider=provider,
+                        config=config,
+                        workspace=config.workspace_path,
+                        skills_dir=Path.home() / ".nanobots" / "skills",
+                    )
+
+                    # HTTPS: CLI flag > config.json > default True
+                    use_https = https if https is not None else web_cfg.https
+                    certfile = ssl_cert or web_cfg.ssl_certfile or ""
+                    keyfile = ssl_key or web_cfg.ssl_keyfile or ""
+
+                    # Default cert paths under nanobot/data/certs/
+                    if use_https and not certfile:
+                        default_certs = Path(__file__).parent.parent / "data" / "certs"
+                        certfile = str(default_certs / "cert.pem")
+                        keyfile = str(default_certs / "key.pem")
+
+                    uvi_kwargs = dict(
+                        host="0.0.0.0", port=effective_web_port, log_level="info",
+                    )
+                    if use_https:
+                        cp, kp = Path(certfile).expanduser(), Path(keyfile).expanduser()
+                        if not cp.exists() or not kp.exists():
+                            console.print(
+                                f"[red]HTTPS enabled but cert/key not found:[/red]\n"
+                                f"  cert: {cp.absolute()} (exists: {cp.exists()})\n"
+                                f"  key:  {kp.absolute()} (exists: {kp.exists()})"
+                            )
+                            raise SystemExit(1)
+                        uvi_kwargs["ssl_certfile"] = str(cp)
+                        uvi_kwargs["ssl_keyfile"] = str(kp)
+
+                    uvi_config = uvicorn.Config(web_app, **uvi_kwargs)
+                    uvi_server = uvicorn.Server(uvi_config)
+                    tasks.append(uvi_server.serve())
+                    proto = "https" if use_https else "http"
+                    console.print(f"[green]✓[/green] Web service on {proto}://0.0.0.0:{effective_web_port}")
+                except ImportError as e:
+                    console.print(f"[yellow]Warning: Web service unavailable ({e})[/yellow]")
+
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
+            if uvi_server:
+                uvi_server.should_exit = True
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
@@ -448,7 +509,7 @@ def agent(
     provider = _make_provider(config)
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
+    cron_store_path = get_user_data_path() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:
@@ -705,7 +766,7 @@ def _get_bridge_dir() -> Path:
     import subprocess
 
     # User's bridge location
-    user_bridge = Path.home() / ".nanobot" / "bridge"
+    user_bridge = get_data_path() / "bridge"
 
     # Check if already built
     if (user_bridge / "dist" / "index.js").exists():
@@ -773,6 +834,9 @@ def channels_login():
     env = {**os.environ}
     if config.channels.whatsapp.bridge_token:
         env["BRIDGE_TOKEN"] = config.channels.whatsapp.bridge_token
+    # Redirect bridge auth storage to tenant-specific directory
+    from nanobot.utils.helpers import get_tenant_data_path
+    env["AUTH_DIR"] = str(get_tenant_data_path("default") / "whatsapp-auth")
 
     try:
         subprocess.run(["npm", "start"], cwd=bridge_dir, check=True, env=env)

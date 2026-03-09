@@ -1,0 +1,96 @@
+/* === Global Reset + CSS Variables + Body === */
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    /* Brand Colors */
+    --primary: #2563EB;
+    --primary-hover: #1D4ED8;
+    --primary-light: #EFF6FF;
+    --primary-muted: rgba(37, 99, 235, 0.12);
+
+    /* Backgrounds */
+    --bg: #F1F5F9;
+    --surface: #FFFFFF;
+    --surface-hover: #F8FAFC;
+    --sidebar-bg: #1E293B;
+    --sidebar-hover: rgba(255,255,255,0.06);
+    --sidebar-active: rgba(37, 99, 235, 0.18);
+
+    /* Chat */
+    --chat-bg: #F1F5F9;
+    --user-bubble: #2563EB;
+    --user-bubble-text: #FFFFFF;
+    --assistant-bubble: #FFFFFF;
+
+    /* Text */
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-muted: #94A3B8;
+    --text-inverse: #FFFFFF;
+    --text-sidebar: #CBD5E1;
+    --text-sidebar-muted: #64748B;
+
+    /* Borders */
+    --border: #E2E8F0;
+    --border-strong: #CBD5E1;
+    --border-sidebar: rgba(255,255,255,0.08);
+
+    /* Shadows */
+    --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+    --shadow-lg: 0 10px 24px rgba(0,0,0,0.10), 0 4px 8px rgba(0,0,0,0.04);
+
+    /* Radii */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+
+    /* Status */
+    --status-success: #10B981;
+    --status-warning: #F59E0B;
+    --status-error: #EF4444;
+    --status-info: #3B82F6;
+
+    /* Legacy compat */
+    --primary-color: #2563EB;
+    --bg-color: #F1F5F9;
+    --text-color: #0F172A;
+    --border-color: #E2E8F0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+body {
+    font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.5;
+}
+
+/* Screen-reader only utility */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

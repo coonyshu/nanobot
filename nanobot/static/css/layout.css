@@ -1,0 +1,313 @@
+/* === App Container + Panel Layout === */
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--bg);
+}
+
+/* Desktop: side-by-side layout */
+@media (min-width: 768px) {
+    .app-container {
+        flex-direction: row;
+    }
+
+    /* Left operation panel - dark enterprise sidebar */
+    .operation-panel {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        border-right: 1px solid var(--border);
+        overflow: hidden;
+    }
+
+    .operation-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 12px 0 20px;
+        height: 58px;
+        background: var(--sidebar-bg);
+        color: var(--text-inverse);
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--border-sidebar);
+    }
+
+    .operation-panel-header h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: #F1F5F9;
+        letter-spacing: 0.02em;
+    }
+
+    .operation-panel-content {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;          /* tab bar must not scroll away */
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+    }
+
+    .operation-panel-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        padding: 20px;       /* restored from parent container */
+        color: var(--text-muted);
+        text-align: center;
+        gap: 12px;
+    }
+
+    .operation-panel-empty svg {
+        width: 52px;
+        height: 52px;
+        opacity: 0.25;
+        color: var(--text-secondary);
+    }
+
+    .operation-panel-empty p {
+        font-size: 13px;
+        line-height: 1.7;
+        color: var(--text-muted);
+    }
+
+    /* Right chat panel */
+    .chat-panel {
+        width: 420px;
+        min-width: 360px;
+        max-width: 480px;
+        display: flex;
+        flex-direction: column;
+        background: var(--chat-bg);
+        border-left: 1px solid var(--border);
+        flex-shrink: 0;
+        transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                    min-width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                    opacity 0.2s ease,
+                    border-color 0.28s ease;
+        overflow: hidden;
+    }
+
+    .chat-panel.collapsed {
+        width: 0;
+        min-width: 0;
+        opacity: 0;
+        border-left-color: transparent;
+        pointer-events: none;
+    }
+}
+
+/* Panel toggle button (in operation-panel header) */
+.panel-toggle-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-sidebar);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.panel-toggle-btn:hover {
+    background: var(--sidebar-hover);
+    color: #F1F5F9;
+}
+
+.panel-toggle-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+}
+
+.panel-toggle-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* Floating reopen button (visible when chat is collapsed) */
+.chat-reopen-fab {
+    display: none;
+    position: fixed;
+    right: 16px;
+    bottom: 24px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-lg);
+    z-index: 80;
+    transition: background 0.15s, transform 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.chat-reopen-fab:hover {
+    background: var(--primary-hover);
+    transform: scale(1.08);
+}
+
+/* Recording state: red pulse */
+.chat-reopen-fab.recording {
+    background: var(--status-error);
+    animation: fab-recording-pulse 1.2s infinite;
+    transform: scale(1.1);
+}
+
+@keyframes fab-recording-pulse {
+    0%, 100% {
+        box-shadow: var(--shadow-lg), 0 0 0 0 rgba(239, 68, 68, 0.5);
+    }
+    50% {
+        box-shadow: var(--shadow-lg), 0 0 0 14px rgba(239, 68, 68, 0);
+    }
+}
+
+/* Long-press hint tooltip */
+.chat-reopen-fab::before {
+    content: '长按语音';
+    position: absolute;
+    right: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%) scale(0.85);
+    background: rgba(15, 23, 42, 0.82);
+    color: #F1F5F9;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    letter-spacing: 0.03em;
+}
+
+.chat-reopen-fab:hover::before {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+}
+
+.chat-reopen-fab svg {
+    width: 22px;
+    height: 22px;
+    position: relative;
+    z-index: 1;
+}
+
+/* ── FAB status animations ────────────────────────────── */
+
+/* Shared ::after ring layer */
+.chat-reopen-fab::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0;
+}
+
+/* Disconnected: dimmed, no ring */
+.chat-reopen-fab[data-status="disconnected"] {
+    opacity: 0.55;
+    filter: grayscale(0.3);
+}
+
+/* Connected idle: full opacity, subtle heartbeat */
+.chat-reopen-fab[data-status="connected"] {
+    opacity: 1;
+}
+
+/* Processing (AI thinking): bright spinning ring + glow pulse */
+.chat-reopen-fab[data-status="processing"] {
+    animation: fab-glow 1.4s ease-in-out infinite;
+}
+
+@keyframes fab-glow {
+    0%, 100% { box-shadow: var(--shadow-lg), 0 0  8px 2px rgba(96, 165, 250, 0.5); }
+    50%       { box-shadow: var(--shadow-lg), 0 0 20px 8px rgba(96, 165, 250, 0.85); }
+}
+
+.chat-reopen-fab[data-status="processing"]::after {
+    inset: -6px;
+    border: 4px solid transparent;
+    border-top-color: #ffffff;
+    border-right-color: rgba(255, 255, 255, 0.55);
+    border-bottom-color: rgba(255, 255, 255, 0.15);
+    opacity: 1;
+    animation: fab-spin 0.65s linear infinite;
+}
+
+@keyframes fab-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Speaking (TTS playing): green + expanding sound-wave rings */
+.chat-reopen-fab[data-status="speaking"] {
+    background: var(--status-success);
+}
+
+.chat-reopen-fab[data-status="speaking"]::after {
+    inset: 0;
+    background: radial-gradient(circle, transparent 50%, rgba(16, 185, 129, 0.5) 100%);
+    opacity: 1;
+    animation: fab-wave 1.5s ease-out infinite;
+}
+
+@keyframes fab-wave {
+    0%   { transform: scale(1);   opacity: 0.9; }
+    100% { transform: scale(1.75); opacity: 0;   }
+}
+
+/* Listening (ASR active): amber + breathing border */
+.chat-reopen-fab[data-status="listening"] {
+    background: var(--status-warning);
+}
+
+.chat-reopen-fab[data-status="listening"]::after {
+    inset: -4px;
+    border: 2px solid rgba(245, 158, 11, 0.7);
+    opacity: 1;
+    animation: fab-listen 1s ease-in-out infinite;
+}
+
+@keyframes fab-listen {
+    0%, 100% { transform: scale(1);    opacity: 0.9; }
+    50%       { transform: scale(1.14); opacity: 0.25; }
+}
+
+@media (min-width: 768px) {
+    .panel-toggle-btn {
+        display: flex;
+    }
+
+    .app-container.chat-collapsed .chat-reopen-fab {
+        display: flex;
+    }
+}
+
+/* Mobile: hide operation panel */
+@media (max-width: 767px) {
+    .operation-panel {
+        display: none;
+    }
+
+    .chat-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+}

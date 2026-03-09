@@ -15,6 +15,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import FeishuConfig
+from nanobot.utils.helpers import get_user_data_path
 
 try:
     import lark_oapi as lark
@@ -568,7 +569,7 @@ class FeishuChannel(BaseChannel):
             (file_path, content_text) - file_path is None if download failed
         """
         loop = asyncio.get_running_loop()
-        media_dir = Path.home() / ".nanobot" / "media"
+        media_dir = get_user_data_path() / "media"
         media_dir.mkdir(parents=True, exist_ok=True)
 
         data, filename = None, None

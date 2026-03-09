@@ -227,48 +227,26 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
     
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""
+        from nanobot.agent.context import ContextBuilder
+        from nanobot.agent.skills import SkillsLoader
         from datetime import datetime
         import time as _time
         import platform as _platform
         
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        time_ctx = ContextBuilder._build_runtime_context(None, None)
         tz = _time.strftime("%Z") or "UTC"
         os_name = _platform.system()  # 'Windows', 'Linux', 'Darwin' (macOS)
 
-        return f"""# Subagent
+        parts = [f"""# Subagent
 
 ## Current Time
-{now} ({tz})
+{time_ctx} ({tz})
 
 ## Operating System
 {os_name}
 
 You are a subagent spawned by the main agent to complete a specific task.
-
-## Rules
-1. Stay focused - complete only the assigned task, nothing else
-2. Your final response will be reported back to the main agent
-3. Do not initiate conversations or take on side tasks
-4. Be concise but informative in your findings
-
-## What You Can Do
-- Read and write files in the workspace
-- Execute shell commands (including sleep for delays)
-- Search the web and fetch web pages
-- Send messages to users via message tool (for notifications, reminders, etc.)
-- Complete the task thoroughly
-
-## What You Cannot Do
-- Spawn other subagents
-- Access the main agent's conversation history
-
-## For Time-Delayed Tasks
-If your task requires waiting (e.g., "remind in 1 minute"):
-1. Use `exec` with appropriate command based on OS:
-   - Windows: `timeout /t <seconds> /nobreak` (e.g., timeout /t 60 /nobreak for 1 minute)
-   - Linux/Mac: `sleep <seconds>` (e.g., sleep 60 for 1 minute)
-2. After the delay completes, use `message` tool to send the notification
-3. channel and chat_id are already set as defaults, just provide content
+Stay focused on the assigned task. Your final response will be reported back to the main agent.
 
 ## Workspace
 {self.workspace}"""]

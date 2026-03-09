@@ -63,6 +63,17 @@ async def connect_mcp_servers(
     logger.info(f"connect_mcp_servers started, {len(mcp_servers)} servers to connect")
 
     for name, cfg in mcp_servers.items():
+        # Normalise: tenant config may provide raw dicts instead of MCPServerConfig
+        if isinstance(cfg, dict):
+            from nanobot.config.schema import MCPServerConfig
+            cfg = MCPServerConfig(
+                command=cfg.get("command", ""),
+                args=cfg.get("args", []),
+                env=cfg.get("env", {}),
+                url=cfg.get("url", ""),
+                headers=cfg.get("headers", {}),
+                tool_timeout=cfg.get("toolTimeout", cfg.get("tool_timeout", 30)),
+            )
         logger.info(f"Attempting to connect to MCP server '{name}': url={cfg.url if hasattr(cfg, 'url') else None}")
         try:
             if cfg.command:

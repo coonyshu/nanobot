@@ -220,7 +220,7 @@ class ChannelsConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
+    workspace: str = "~/.nanobots/tenants/default"
     model: str = "anthropic/claude-opus-4-5"
     provider: str = "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     max_tokens: int = 8192
@@ -273,12 +273,22 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class WebServiceConfig(Base):
+    """Web (FastAPI) service configuration."""
+
+    port: int = 8000
+    https: bool = True
+    ssl_certfile: str = ""  # Empty = use default nanobot/data/certs/cert.pem
+    ssl_keyfile: str = ""
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    web: WebServiceConfig = Field(default_factory=WebServiceConfig)
 
 
 class WebSearchConfig(Base):
@@ -322,6 +332,49 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# Voice
+# ---------------------------------------------------------------------------
+
+class VoiceASRConfig(Base):
+    """ASR (Automatic Speech Recognition) provider credentials."""
+
+    provider: str = "aliyun_stream"
+    access_key_id: str = ""
+    access_key_secret: str = ""
+    appkey: str = ""
+    host: str = "nls-gateway-cn-shanghai.aliyuncs.com"
+
+
+class VoiceTTSConfig(Base):
+    """TTS (Text-to-Speech) provider credentials."""
+
+    provider: str = "aliyun_stream"
+    access_key_id: str = ""
+    access_key_secret: str = ""
+    appkey: str = ""
+    host: str = "nls-gateway-cn-beijing.aliyuncs.com"
+    voice: str = "xiaoyun"
+
+
+class VoiceVADConfig(Base):
+    """VAD (Voice Activity Detection) configuration."""
+
+    enabled: bool = True
+
+
+class VoiceConfig(Base):
+    """Voice module configuration (common fields only)."""
+
+    enabled: bool = True
+    sample_rate: int = 16000
+    audio_format: str = "opus"
+    session_timeout: int = 3600
+    asr: VoiceASRConfig = Field(default_factory=VoiceASRConfig)
+    tts: VoiceTTSConfig = Field(default_factory=VoiceTTSConfig)
+    vad: VoiceVADConfig = Field(default_factory=VoiceVADConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -330,6 +383,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
 
     @property
     def workspace_path(self) -> Path:

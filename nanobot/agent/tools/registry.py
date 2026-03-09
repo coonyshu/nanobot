@@ -14,6 +14,7 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
+        self._hidden: set[str] = set()  # Tools hidden from LLM but still callable internally
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -22,6 +23,7 @@ class ToolRegistry:
     def unregister(self, name: str) -> None:
         """Unregister a tool by name."""
         self._tools.pop(name, None)
+        self._hidden.discard(name)
 
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
@@ -31,13 +33,40 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
-    def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
+    def hide_from_llm(self, *names: str) -> None:
+        """Hide tools from LLM tool definitions.
 
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
-        """Execute a tool by name with given parameters."""
+        Hidden tools are still callable internally (e.g. by WorkflowRunner)
+        but the LLM cannot see or invoke them directly.
+        """
+        self._hidden.update(names)
+
+    def hide_pattern_from_llm(self, prefix: str) -> None:
+        """Hide all tools whose names start with the given prefix."""
+        for name in list(self._tools):
+            if name.startswith(prefix):
+                self._hidden.add(name)
+
+    def get_definitions(self) -> list[dict[str, Any]]:
+        """Get tool definitions visible to the LLM (excludes hidden tools)."""
+        return [tool.to_schema() for name, tool in self._tools.items()
+                if name not in self._hidden]
+
+    async def execute(self, name: str, params: dict[str, Any], *, internal: bool = False) -> str:
+        """Execute a tool by name with given parameters.
+
+        Args:
+            internal: If True, bypass the hidden-tool check (for WorkflowRunner
+                      internal calls). If False (default, LLM path), hidden tools
+                      return an error.
+        """
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
+
+        if not internal and name in self._hidden:
+            return (
+                f"Error: Tool '{name}' is not directly available. "
+                "Use the workflow_* tools to perform this action."
+            ) + _HINT
 
         tool = self._tools.get(name)
         if not tool:

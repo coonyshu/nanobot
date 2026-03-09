@@ -1,0 +1,89 @@
+/* === ASR Interim + Voice Recording Modal === */
+
+/* ASR interim display */
+.asr-interim {
+    position: fixed;
+    bottom: 84px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.88);
+    color: #F1F5F9;
+    padding: 7px 18px;
+    border-radius: var(--radius-xl);
+    font-size: 13px;
+    display: none;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    letter-spacing: 0.01em;
+    max-width: 280px;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.asr-interim.show {
+    display: block;
+}
+
+/* Voice Recording Modal */
+.voice-modal {
+    display: none;
+    position: fixed;
+    left: 50%;
+    bottom: 110px;
+    transform: translateX(-50%);
+    z-index: 200;
+    pointer-events: none;
+}
+
+.voice-modal.show {
+    display: block;
+}
+
+.voice-modal-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 20px 28px;
+    background: rgba(15, 23, 42, 0.92);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+}
+
+.voice-visualizer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 48px;
+    width: 160px;
+}
+
+.voice-visualizer .bar {
+    width: 3px;
+    background: linear-gradient(to top, var(--primary), #60A5FA);
+    border-radius: 3px;
+    transition: height 0.06s ease;
+    min-height: 4px;
+}
+
+.voice-text {
+    color: #E2E8F0;
+    font-size: 14px;
+    max-width: 240px;
+    text-align: center;
+    min-height: 22px;
+    line-height: 1.5;
+}
+
+.voice-text:empty::after {
+    content: '\6B63\5728\8046\542C\2026';
+    color: rgba(255,255,255,0.35);
+}
+
+@keyframes slideUp {
+    from { transform: translateX(-50%) translateY(12px); opacity: 0; }
+    to   { transform: translateX(-50%) translateY(0);   opacity: 1; }
+}

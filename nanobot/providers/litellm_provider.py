@@ -302,22 +302,22 @@ class LiteLLMProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
-        enable_thinking: bool = True,  # 控制是否启用思考模式
+        enable_thinking: bool = True,  # Controls whether thinking/reasoning mode is enabled
     ) -> AsyncGenerator[tuple[str | None, str | None, list[ToolCallRequest] | None, str | None], None]:
         """
         Stream chat completion responses via LiteLLM.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions in OpenAI format.
             model: Model identifier.
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
-        
+
         Yields:
             Tuples of (content_chunk, reasoning_chunk, tool_calls, finish_reason)
-            - content_chunk: 最终用户可见的文本块
-            - reasoning_chunk: 思考过程文本块（可选）
+            - content_chunk: Text chunk visible to the end user
+            - reasoning_chunk: Reasoning/thinking process text chunk (optional)
             - tool_calls: List of tool calls if complete
             - finish_reason: Finish reason if stream ended
         """
@@ -352,7 +352,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         
-        # 对于 Qwen 模型，通过 extra_body 传递 enable_thinking 参数
+        # For Qwen models, pass enable_thinking via extra_body
         if "qwen" in model.lower() or "dashscope" in model.lower():
             if not enable_thinking:
                 kwargs["extra_body"] = {
@@ -365,34 +365,34 @@ class LiteLLMProvider(LLMProvider):
         try:
             logger.info(f"[Stream] Starting stream: {model}, enable_thinking={enable_thinking}")
             response = await acompletion(**kwargs)
-            
-            # 收集工具调用信息
+
+            # Collect tool call information
             tool_call_chunks = {}
             chunk_count = 0
-            
+
             async for chunk in response:
                 chunk_count += 1
-                
+
                 if not hasattr(chunk, "choices") or len(chunk.choices) == 0:
                     continue
-                
+
                 choice = chunk.choices[0]
                 delta = choice.delta
                 finish_reason = choice.finish_reason
-                
-                # 文本内容（区分 reasoning_content 和 content）
+
+                # Text content (distinguish between reasoning_content and content)
                 content = None
                 reasoning = None
-                
+
                 if hasattr(delta, "content") and delta.content:
-                    # 最终用户可见的内容
+                    # Content visible to the end user
                     content = delta.content
-                
+
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    # 思考过程（内部推理）
+                    # Reasoning/thinking process (internal)
                     reasoning = delta.reasoning_content
-                
-                # 工具调用（流式的工具调用需要逐块组装）
+
+                # Tool calls (streaming tool calls need to be assembled chunk by chunk)
                 tool_calls_complete = None
                 if hasattr(delta, "tool_calls") and delta.tool_calls:
                     for tc_delta in delta.tool_calls:
@@ -413,8 +413,8 @@ class LiteLLMProvider(LLMProvider):
                                 tool_call_chunks[idx]["name"] += func.name
                             if hasattr(func, "arguments") and func.arguments:
                                 tool_call_chunks[idx]["arguments"] += func.arguments
-                
-                # 如果流结束且有工具调用，解析工具调用
+
+                # If stream ends and there are tool calls, parse them
                 if finish_reason and tool_call_chunks:
                     tool_calls_complete = []
                     for tc_data in tool_call_chunks.values():
@@ -430,9 +430,9 @@ class LiteLLMProvider(LLMProvider):
                         ))
                 
                 yield (content, reasoning, tool_calls_complete, finish_reason)
-            
+
             logger.info(f"[Stream] Stream completed, total chunks: {chunk_count}")
-                        
+
         except Exception as e:
             logger.error(f"[Stream] Error in chat_stream: {e}")
-            yield (f"Error calling LLM: {str(e)}", None, "error")
+            yield (f"Error calling LLM: {str(e)}", None, None, "error")

@@ -1,0 +1,20 @@
+# Voice Module Dependencies for nanobot-service
+# 
+# These dependencies are required for the voice interaction module.
+# Install with: pip install -r voice/requirements.txt
+
+# WebSocket communication
+websockets>=10.4
+
+# Opus audio codec
+opuslib-next>=3.0.1
+
+# ONNX Runtime for VAD model inference
+onnxruntime>=1.15.0
+
+# HTTP client for Aliyun token requests
+requests>=2.28.0
+httpx>=0.24.0
+
+# NumPy for audio processing
+numpy>=1.21.0

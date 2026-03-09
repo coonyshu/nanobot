@@ -39,6 +39,7 @@ except ImportError as e:
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.base import BaseChannel
 from nanobot.config.loader import get_data_dir
+from nanobot.utils.helpers import get_tenant_data_path, get_user_data_path
 from nanobot.utils.helpers import safe_filename
 
 TYPING_NOTICE_TIMEOUT_MS = 30_000
@@ -163,7 +164,7 @@ class MatrixChannel(BaseChannel):
         self._running = True
         _configure_nio_logging_bridge()
 
-        store_path = get_data_dir() / "matrix-store"
+        store_path = get_tenant_data_path("default") / "matrix-store"
         store_path.mkdir(parents=True, exist_ok=True)
 
         self.client = AsyncClient(
@@ -490,7 +491,7 @@ class MatrixChannel(BaseChannel):
         return False
 
     def _media_dir(self) -> Path:
-        d = get_data_dir() / "media" / "matrix"
+        d = get_user_data_path() / "media" / "matrix"
         d.mkdir(parents=True, exist_ok=True)
         return d
 

@@ -12,14 +12,24 @@ def ensure_dir(path: Path) -> Path:
 
 
 def get_data_path() -> Path:
-    """~/.nanobot data directory."""
-    return ensure_dir(Path.home() / ".nanobot")
+    """~/.nanobots data directory."""
+    return ensure_dir(Path.home() / ".nanobots")
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve and ensure workspace path. Defaults to ~/.nanobot/workspace."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    """Resolve and ensure workspace path. Defaults to ~/.nanobots/tenants/default."""
+    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobots" / "tenants" / "default"
     return ensure_dir(path)
+
+
+def get_tenant_data_path(tenant_id: str = "default") -> Path:
+    """Return tenant-specific data directory: ~/.nanobots/tenants/{tenant_id}."""
+    return ensure_dir(get_data_path() / "tenants" / tenant_id)
+
+
+def get_user_data_path(tenant_id: str = "default", user_id: str = "default") -> Path:
+    """Return user-specific data directory: ~/.nanobots/tenants/{tid}/users/{uid}."""
+    return ensure_dir(get_tenant_data_path(tenant_id) / "users" / user_id)
 
 
 def timestamp() -> str:

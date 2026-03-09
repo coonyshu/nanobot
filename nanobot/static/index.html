@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1E293B">
+    <title>AI 助理</title>
+    <!-- Markdown parser (local vendor) -->
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <!-- Modular CSS -->
+    <link rel="stylesheet" href="/static/css/variables.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="stylesheet" href="/static/css/chat.css">
+    <link rel="stylesheet" href="/static/css/voice.css">
+    <link rel="stylesheet" href="/static/css/modals.css">
+    <link rel="stylesheet" href="/static/css/work-form.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Left operation panel (desktop) -->
+        <div class="operation-panel" id="operationPanel">
+            <div class="operation-panel-header">
+                <h2>工作区</h2>
+                <button class="panel-toggle-btn" id="chatToggleBtn" data-action="toggle-chat-panel" aria-label="收起 AI 助理" title="收起 AI 助理">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="operation-panel-content" id="operationPanelContent">
+                <div class="operation-panel-empty" id="operationPanelEmpty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+                    </svg>
+                    <p>暂无工作内容<br>打开工作表单后将在此显示</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right chat panel -->
+        <div class="chat-panel" id="chatPanel">
+            <!-- Header -->
+            <div class="header">
+                <div>
+                    <div class="header-title">AI 助理</div>
+                    <div class="header-status">
+                        <div class="status-dot" id="statusDot"></div>
+                        <span id="statusText">未连接</span>
+                    </div>
+                </div>
+                <div class="header-user" id="headerUser" style="display:none">
+                    <button class="header-btn" id="userMenuBtn" data-action="toggle-user-menu" aria-label="用户菜单">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" width="18" height="18">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        <span id="userMenuName"></span>
+                    </button>
+                    <div class="user-dropdown" id="userDropdown">
+                        <div class="user-dropdown-info">
+                            <div class="user-dropdown-name" id="dropdownUserName"></div>
+                            <div class="user-dropdown-role" id="dropdownUserRole"></div>
+                        </div>
+                        <hr class="user-dropdown-divider">
+                        <button class="user-dropdown-item" data-action="switch-user">切换账号</button>
+                        <button class="user-dropdown-item danger" data-action="logout">退出登录</button>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button class="header-btn" data-action="toggle-log" aria-label="调试日志">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+                        </svg>
+                    </button>
+                    <button class="header-btn" data-action="show-settings" aria-label="系统设置">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Log Panel -->
+            <div class="log-panel" id="logPanel"></div>
+
+            <!-- Chat Area -->
+            <div class="chat-area" id="chatArea">
+                <div class="message system"></div>
+            </div>
+
+            <!-- ASR Interim -->
+
+            <!-- Voice Recording Modal (moved to top-level to avoid opacity inheritance) -->
+
+            <!-- Image Preview -->
+            <div class="image-preview-bar" id="imagePreviewBar">
+                <img id="previewImg" src="" alt="preview">
+                <div class="preview-info" id="previewInfo">图片已选择</div>
+                <button class="preview-close" data-action="clear-image">&times;</button>
+            </div>
+
+            <!-- Input Area - Composer Style -->
+            <div class="input-area">
+                <div class="input-composer">
+                    <label for="textInput" class="sr-only">输入消息</label>
+                    <textarea id="textInput" rows="1" placeholder="输入消息…" autocomplete="off" spellcheck="false"></textarea>
+                    <div class="input-toolbar">
+                        <div class="toolbar-left">
+                            <button class="tool-btn" id="btnImage" data-action="pick-image" disabled aria-label="拍照或选择图片">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                                    <polyline points="21 15 16 10 5 21"/>
+                                </svg>
+                            </button>
+                            <button class="tool-btn" id="btnVoice" disabled aria-label="语音输入">
+                                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="toolbar-right">
+                            <button class="tool-btn thinking-btn" id="thinkingToggleBtn" data-action="toggle-thinking" aria-label="切换深度思考模式" aria-pressed="false">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                    <path d="M9.663 17h4.673M12 3a6 6 0 0 1 4.33 10.174C15.36 14.21 15 15.366 15 16.5h-6c0-1.134-.36-2.29-1.33-3.326A6 6 0 0 1 12 3z"/>
+                                    <path d="M9 21h6"/>
+                                </svg>
+                                <span>深度思考</span>
+                            </button>
+                            <button class="tool-btn btn-send" id="btnSend" data-action="send-message" disabled aria-label="发送消息">
+                                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hidden file inputs -->
+        <input type="file" class="hidden-input" id="fileInput" accept="image/*">
+        <input type="file" class="hidden-input" id="cameraInput" accept="image/*" capture="environment">
+        
+        <!-- Floating button to reopen AI chat when collapsed -->
+        <button class="chat-reopen-fab" id="chatReopenFab" data-action="toggle-chat-panel" aria-label="打开 AI 助理，长按语音输入">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+        </button>
+
+        <!-- ASR Interim (top-level: not affected by chat panel opacity) -->
+        <div class="asr-interim" id="asrInterim"></div>
+
+        <!-- Voice Recording Modal (top-level: not affected by chat panel opacity) -->
+        <div class="voice-modal" id="voiceModal">
+            <div class="voice-modal-content">
+                <div class="voice-visualizer" id="voiceVisualizer"></div>
+                <div class="voice-text" id="voiceText"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal-overlay" id="loginModal" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+        <div class="modal login-modal">
+            <div class="modal-header">
+                <h3 id="loginTitle">登录</h3>
+            </div>
+            <!-- Login form view -->
+            <div id="loginFormView">
+                <div class="modal-body">
+                    <div class="setting-item">
+                        <label for="loginUsername">用户名</label>
+                        <input type="text" id="loginUsername" autocomplete="username" spellcheck="false" placeholder="请输入用户名">
+                    </div>
+                    <div class="setting-item">
+                        <label for="loginPassword">密码</label>
+                        <input type="password" id="loginPassword" autocomplete="current-password" placeholder="请输入密码">
+                    </div>
+                    <div class="login-error" id="loginError"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="modal-btn primary" id="btnLogin" data-action="login-submit">登录</button>
+                </div>
+                <div class="login-switch-link">
+                    没有账号？<a data-action="show-register">立即注册</a>
+                </div>
+            </div>
+            <!-- Register form view (hidden by default) -->
+            <div id="registerFormView" style="display:none">
+                <div class="modal-body">
+                    <div class="setting-item">
+                        <label for="registerUsername">用户名</label>
+                        <input type="text" id="registerUsername" autocomplete="username" spellcheck="false" placeholder="请输入用户名">
+                    </div>
+                    <div class="setting-item">
+                        <label for="registerPassword">密码</label>
+                        <input type="password" id="registerPassword" autocomplete="new-password" placeholder="请输入密码（至少6位）">
+                    </div>
+                    <div class="setting-item">
+                        <label for="registerPasswordConfirm">确认密码</label>
+                        <input type="password" id="registerPasswordConfirm" autocomplete="new-password" placeholder="再次输入密码">
+                    </div>
+                    <div class="register-error" id="registerError"></div>
+                    <div class="register-success" id="registerSuccess"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="modal-btn primary" id="btnRegister" data-action="register-submit">注册</button>
+                </div>
+                <div class="login-switch-link">
+                    已有账号？<a data-action="show-login">返回登录</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="settingsTitle">连接设置</h3>
+                <button class="modal-close" data-action="hide-settings" aria-label="关闭设置">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <label for="serverHost">服务器地址</label>
+                    <input type="url" id="serverHost" name="serverHost" value="" autocomplete="url" placeholder="ws://localhost:8000">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn secondary" data-action="hide-settings">取消</button>
+                <button class="modal-btn primary" id="btnConnect" data-action="toggle-connection">连接</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ES Module entry point -->
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
