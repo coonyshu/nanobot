@@ -15,10 +15,7 @@ class WorkFormManager {
         // Will be loaded async from backend
         this._nodesLoaded = false;
 
-        // When any fields are updated (including photos via PhotoHandler), refresh next button
-        eventBus.on('work:fields_updated', ({ nodeId }) => {
-            this._refreshNextButton(nodeId);
-        });
+
     }
 
     /**
@@ -245,18 +242,41 @@ class WorkFormManager {
      * Used by AI to determine if the form needs to be reopened.
      */
     getStatus() {
+        // Check if there are any work tabs open
+        const workTabs = Object.values(AppState.workTabs).filter(tab => tab.type === 'work');
+        const hasWorkTabs = workTabs.length > 0;
+        
+        // Get current work state
         const state = AppState.currentWorkState;
         const isOpen = !!(state && state.userId);
-        // Also check if the DOM container is actually visible
-        const domPresent = !!(document.querySelector('.work-form-embedded') || document.querySelector('.work-form-modal'));
+        
+        // Check if the DOM container is actually present
+        const domPresent = !!(document.querySelector('.work-form-embedded') || document.querySelector('.work-form-modal') || document.querySelector('.work-form-panel'));
+        
+        // Check if current active tab is a work tab
+        const activeTab = tabManager.getActiveTab();
+        const tabActive = activeTab && activeTab.type === 'work';
+        
+        // Get task info from current work state
+        const taskId = state?.taskId || null;
+        const userId = state?.userId || null;
+        const workType = state?.workType || null;
+        const address = state?.address || null;
+        const currentNode = state?.currentNode || null;
+        
+        // Determine if form is open
+        const formOpen = (isOpen || hasWorkTabs) && domPresent;
+        
         return JSON.stringify({
             success: true,
-            is_open: isOpen && domPresent,
-            task_id: state?.taskId || null,
-            user_id: state?.userId || null,
-            work_type: state?.workType || null,
-            address: state?.address || null,
-            current_node: state?.currentNode || null,
+            is_open: formOpen,
+            tab_active: tabActive,
+            task_id: taskId,
+            user_id: userId,
+            work_type: workType,
+            address: address,
+            current_node: currentNode,
+            work_tabs_count: workTabs.length
         });
     }
 
@@ -561,29 +581,33 @@ class WorkFormManager {
         }
 
         const nodeItem = document.querySelector(`.work-form-node-item[data-node-id="${nodeId}"]`);
-        if (!nodeItem) {
-            return JSON.stringify({ success: false, error: 'node_not_found', message: `未找到场景 ${nodeId}` });
-        }
+        
+        // Update DOM if node exists
+        if (nodeItem) {
+            nodeItem.classList.remove('pending', 'active', 'completed');
+            nodeItem.classList.add(status);
+            console.log(`[updateNodeStatus] Node ${nodeId} classes updated:`, nodeItem.className);
 
-        nodeItem.classList.remove('pending', 'active', 'completed');
-        nodeItem.classList.add(status);
-        console.log(`[updateNodeStatus] Node ${nodeId} classes updated:`, nodeItem.className);
-
-        const statusEl = nodeItem.querySelector('.node-status');
-        if (statusEl) {
-            statusEl.classList.remove('pending', 'active', 'completed');
-            statusEl.classList.add(status);
-            statusEl.textContent = status === 'completed' ? '已完成' : (status === 'active' ? '进行中' : '待检查');
-        }
-
-        if (hazard) {
-            const existing = nodeItem.querySelector('.hazard-badge');
-            if (!existing) {
-                const badge = document.createElement('span');
-                badge.className = `hazard-badge ${hazard.level}`;
-                badge.textContent = hazard.level === 'red' ? '红色隐患' : '黄色隐患';
-                nodeItem.querySelector('.node-info').appendChild(badge);
+            const statusEl = nodeItem.querySelector('.node-status');
+            if (statusEl) {
+                statusEl.classList.remove('pending', 'active', 'completed');
+                statusEl.classList.add(status);
+                statusEl.textContent = status === 'completed' ? '已完成' : (status === 'active' ? '进行中' : '待检查');
             }
+
+            if (hazard) {
+                const existing = nodeItem.querySelector('.hazard-badge');
+                if (!existing) {
+                    const badge = document.createElement('span');
+                    badge.className = `hazard-badge ${hazard.level}`;
+                    badge.textContent = hazard.level === 'red' ? '红色隐患' : '黄色隐患';
+                    nodeItem.querySelector('.node-info').appendChild(badge);
+                }
+            }
+        }
+        
+        // Always update work state regardless of DOM presence
+        if (hazard) {
             AppState.currentWorkState.hazards.push({ nodeId, ...hazard });
         }
 
@@ -596,8 +620,6 @@ class WorkFormManager {
         }
         if (status === 'active') {
             AppState.currentWorkState.currentNode = nodeId;
-            // Refresh next-scene button for newly activated node
-            this._refreshNextButton(nodeId);
         }
 
         eventBus.emit('log', { msg: `场景 ${nodeId} 状态更新为 ${status}`, type: 'info' });
@@ -637,21 +659,7 @@ class WorkFormManager {
      * Check if node has all required fields filled and show/hide the next-scene button.
      * @param {string} nodeId
      */
-    _refreshNextButton(nodeId) {
-        const nodeItem = document.querySelector(`.work-form-node-item[data-node-id="${nodeId}"]`);
-        if (!nodeItem) return;
-        const btn = nodeItem.querySelector('.node-next-btn');
-        if (!btn) return;
 
-        // Only show for active (not completed/pending) node
-        if (!nodeItem.classList.contains('active')) {
-            btn.style.display = 'none';
-            return;
-        }
-
-        const check = this._checkRequiredFields(nodeId);
-        btn.style.display = check.complete ? 'inline-flex' : 'none';
-    }
 
     /**
      * Advance to the next node in sequence.
@@ -681,6 +689,8 @@ class WorkFormManager {
             this.updateNodeStatus(currentNodeId, 'completed');
             const nextnode = AppState.nodes[currentIndex + 1];
             this.updateNodeStatus(nextnode.id, 'active');
+            // Reset next scene button flag for new node
+            AppState.nextSceneButtonShown = false;
             return true;
         }
         return false;
@@ -808,6 +818,27 @@ class WorkFormManager {
     }
 
     /**
+     * Get avatar emoji based on agent type.
+     */
+    getAvatarForAgent(type, agentName) {
+        if (type === 'user') {
+            return '&#128100;'; // User emoji
+        }
+        
+        if (agentName) {
+            const name = agentName.toLowerCase();
+            if (name.includes('workflow') || name.includes('inspector') || name.includes('安检')) {
+                return '&#128196;'; // Badge/Inspector emoji
+            }
+            if (name.includes('tool') || name.includes('worker')) {
+                return '&#128736;'; // Tool emoji
+            }
+        }
+        
+        return '&#129302;'; // Default robot emoji
+    }
+
+    /**
      * Reopen the form or activate existing tab.
      */
     reopen(userId, workType, address) {
@@ -884,9 +915,53 @@ class WorkFormManager {
         const existingNodeFields = [...document.querySelectorAll('[data-node-fields]')].map(el=>el.dataset.nodeFields).join(',');
         console.log(`[updateNodeFields] nodeId=${nodeId}, container=`, container, ', existing:', existingNodeFields);
         if (!container) {
-            console.error(`[updateNodeFields] ❌ container NOT found for "${nodeId}", existing: ${existingNodeFields}`);
-            eventBus.emit('log', { msg: `[updateNodeFields] ❌ 未找到 .node-fields[data-node-fields="${nodeId}"] 容器，DOM中现有节点: ${existingNodeFields}`, type: 'error' });
-            return JSON.stringify({ success: false, message: `未找到场景 ${nodeId} 的字段容器` });
+            console.warn(`[updateNodeFields] ⚠️ container NOT found for "${nodeId}", existing: ${existingNodeFields}`);
+            eventBus.emit('log', { msg: `[updateNodeFields] ⚠️ 未找到 .node-fields[data-node-fields="${nodeId}"] 容器，DOM中现有节点: ${existingNodeFields}`, type: 'warning' });
+            // 初始化场景字段缓存（如果不存在）
+            if (!AppState.nodeFieldsCache) AppState.nodeFieldsCache = {};
+            if (!AppState.nodeFieldsCache[nodeId]) AppState.nodeFieldsCache[nodeId] = {};
+            if (!AppState.currentWorkState.nodeFields) AppState.currentWorkState.nodeFields = {};
+            if (!AppState.currentWorkState.nodeFields[nodeId]) AppState.currentWorkState.nodeFields[nodeId] = {};
+            
+            // 构建 label→fieldKey 反查表
+            const fieldDefs = AppState.fieldDefinitions?.[nodeId] || {};
+            const labelToKey = {};
+            for (const [key, def] of Object.entries(fieldDefs)) {
+                labelToKey[def.label] = key;
+            }
+            
+            // 将传入字段统一转换为 fieldKey 存储（支持 label 或 fieldKey 两种输入）
+            // 未知字段（既不是 label 也不是 fieldKey）直接跳过，避免脏数据写入缓存
+            const normalizedFields = {};
+            const unknownFields = [];
+            for (const [k, v] of Object.entries(fields)) {
+                if (labelToKey[k]) {
+                    // 输入是 label（中文），转为 fieldKey
+                    normalizedFields[labelToKey[k]] = v;
+                } else if (fieldDefs[k]) {
+                    // 输入已经是 fieldKey
+                    normalizedFields[k] = v;
+                } else {
+                    // 完全未知的字段，忽略并记录警告
+                    unknownFields.push(k);
+                }
+            }
+            if (unknownFields.length > 0) {
+                eventBus.emit('log', { msg: `[updateNodeFields] ⚠️ 忽略未知字段: ${unknownFields.join(', ')}（非 ${nodeId} 的合法 label 或 fieldKey）`, type: 'warning' });
+            }
+            
+            // 合并到缓存（用 fieldKey 存储）
+            Object.assign(AppState.nodeFieldsCache[nodeId], normalizedFields);
+            Object.assign(AppState.currentWorkState.nodeFields[nodeId], normalizedFields);
+            
+            eventBus.emit('log', { msg: `场景 ${nodeId} 字段更新: ${Object.entries(normalizedFields).map(([k,v]) => `${k}=${v}`).join(', ')}`, type: 'info' });
+            
+            // Emit event to trigger context update so AI knows about the field changes
+            eventBus.emit('work:fields_updated', { nodeId, fields: normalizedFields });
+            
+
+            
+            return JSON.stringify({ success: true, node_id: nodeId, updated_fields: Object.keys(normalizedFields), message: `已更新 ${Object.keys(normalizedFields).length} 个字段（节点不在DOM中，仅更新缓存）` });
         }
         console.log(`[updateNodeFields] ✅ container found for "${nodeId}", setting fields:`, fields);
         eventBus.emit('log', { msg: `[updateNodeFields] ✅ 找到容器 ${nodeId}，fields=${JSON.stringify(fields)}`, type: 'info' });
@@ -953,9 +1028,6 @@ class WorkFormManager {
 
         // Emit event to trigger context update so AI knows about the field changes
         eventBus.emit('work:fields_updated', { nodeId, fields: normalizedFields });
-
-        // Refresh next-scene button visibility for active node
-        this._refreshNextButton(nodeId);
 
         return JSON.stringify({ success: true, node_id: nodeId, updated_fields: Object.keys(normalizedFields), message: `已更新 ${Object.keys(normalizedFields).length} 个字段` });
     }

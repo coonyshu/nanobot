@@ -16,6 +16,17 @@ class WebSocketService {
         this._lastHost = null;
         this._lastUserId = null;
         this._isManualDisconnect = false; // true when user clicks disconnect
+        
+        // Listen for log events and send to backend
+        eventBus.on('log', (data) => {
+            if (this.isOpen) {
+                this.sendJSON({
+                    type: 'log',
+                    message: data.msg,
+                    level: data.type || 'info'
+                });
+            }
+        });
     }
 
     /**

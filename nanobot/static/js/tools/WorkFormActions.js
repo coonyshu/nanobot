@@ -201,6 +201,8 @@ class WorkFormActions {
         tabManager.closeTab(tabId);
         return JSON.stringify({ success: true, tabId, message: `已关闭页签 ${tabId}` });
     }
+
+
 }
 
 export default new WorkFormActions();

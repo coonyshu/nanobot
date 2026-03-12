@@ -342,6 +342,24 @@ class Agent:
             response = await child.process_message(task)
             return response
         finally:
+            # Clear active_agent if child session is exiting
+            if child._session and child._session.status == "exiting":
+                try:
+                    from nanobot.session.manager import SessionManager
+                    user_workspace = self.agent_workspace.parent.parent if self.agent_workspace.parent.name == "agents" else None
+                    if user_workspace:
+                        sessions = SessionManager(user_workspace)
+                        session_key = f"{self.channel}:{self.chat_id}"
+                        session = sessions.get_or_create(session_key)
+                        if "active_agent" in session.metadata:
+                            del session.metadata["active_agent"]
+                            sessions.save(session)
+                            logger.info("[Agent:{}] cleared active_agent for child '{}'",
+                                         self.agent_name, agent_name)
+                except Exception as e:
+                    logger.warning("[Agent:{}] failed to clear active_agent: {}",
+                                   self.agent_name, e)
+            
             if child._session and child._session.status == "closed":
                 await child.disconnect_mcp()
                 del self._child_agents[agent_name]

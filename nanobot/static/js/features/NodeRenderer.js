@@ -44,7 +44,6 @@ class NodeRenderer {
                         <div class="node-purpose">${node.purpose}</div>
                         <div class="node-fields" data-node-fields="${node.id}"></div>
                         <div class="node-photos" data-node-photos="${node.id}"></div>
-                        <button class="node-next-btn" data-action="advance-to-next-node" data-node-id="${node.id}" style="display:none">进入下一场景 →</button>
                     </div>
                     <span class="node-status ${statusClass}">${statusText}</span>
                     <button class="node-upload-btn" data-action="pick-node-image" data-node-id="${node.id}" title="拍照/上传">

@@ -638,6 +638,21 @@ class VoiceWebSocketHandler:
                     await self.extra_message_handler(session.user_id, data)
                 logger.info(f"Voice WebSocket: registered {len(descriptors)} frontend tools for user={session.user_id}")
             
+            elif msg_type == "log":
+                # Handle log messages from frontend
+                message = data.get("message", "")
+                level = data.get("level", "info")
+                if message:
+                    if level == "error":
+                        logger.error(f"Frontend error: {message}")
+                    elif level == "warning":
+                        logger.warning(f"Frontend warning: {message}")
+                    else:
+                        logger.info(f"Frontend info: {message}")
+                # Forward to extra handler if available
+                if self.extra_message_handler:
+                    await self.extra_message_handler(session.user_id, data)
+            
             else:
                 # Forward unrecognized messages to extra handler
                 if self.extra_message_handler:

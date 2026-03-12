@@ -135,9 +135,9 @@ async def agent_callback(
         logger.info("[AgentCallback] process_for_user returned: agent_name={}, response_len={}", 
                     agent_name, len(response) if response else 0)
 
-        preview = response[:100] if response else "empty"
+        # 显示完整的响应内容，不再截断
         logger.info("[AgentCallback] response from agent (agent_name={}, response_len={}): {}", 
-                    agent_name, len(response) if response else 0, preview)
+                    agent_name, len(response) if response else 0, response or "empty")
 
         # Check if SubAgent was active based on returned agent_name
         # If agent_name is not None, SubAgent processed the message and response was already sent via bus

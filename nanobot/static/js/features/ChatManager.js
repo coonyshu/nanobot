@@ -45,6 +45,12 @@ class ChatManager {
      * @param {string|null} agentName - Agent name for avatar differentiation
      */
     addMessage(content, type = 'assistant', agentName = null) {
+        // Clear any existing streaming message when new message is added
+        if (AppState.currentStreamingMessage) {
+            AppState.currentStreamingMessage = null;
+            AppState.streamingText = '';
+        }
+
         const msg = document.createElement('div');
         msg.className = 'message ' + type;
 
@@ -216,18 +222,42 @@ class ChatManager {
         const msg = document.createElement('div');
         msg.className = 'message system';
         msg.innerHTML = `
-            <div class="avatar">\u2139\uFE0F</div>
+            <div class="avatar">ℹ️</div>
             <div class="bubble">
                 ${text}
                 <button class="reopen-form-btn" data-action="reopen-work-form"
                     data-user-id="${userId}" data-work-type="${workType}" data-address="${address || ''}">
-                    \uD83D\uDCCB 重新打开
+                    📋 重新打开
                 </button>
             </div>
         `;
 
         this.chatArea.appendChild(msg);
         this.chatArea.scrollTop = this.chatArea.scrollHeight;
+    }
+
+    /**
+     * Add a message with next scene button.
+     */
+    addMessageWithNextSceneButton(text) {
+        const msg = document.createElement('div');
+        msg.className = 'message assistant';
+        const avatar = this.getAvatarForAgent('assistant', AppState.currentAgentName);
+        msg.innerHTML = `
+            <div class="avatar">${avatar}</div>
+            <div class="bubble">
+                ${text}
+                <button class="node-next-btn" data-action="advance-to-next-node">
+                    进入下一场景 →
+                </button>
+            </div>
+        `;
+
+        this.chatArea.appendChild(msg);
+        this.chatArea.scrollTop = this.chatArea.scrollHeight;
+        
+        // Emit log event for backend recording
+        eventBus.emit('log', { msg: `Assistant message: ${text}`, type: 'info' });
     }
 }
 

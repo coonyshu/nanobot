@@ -225,11 +225,16 @@ class AgentLoop:
         sessions,
         user_workspace: Path | None = None,
     ) -> Agent:
-        if session_key in self._agents:
-            return self._agents[session_key]
-        
         session = sessions.get_or_create(session_key)
         agent_name = session.metadata.get("active_agent", "default")
+        
+        # Check if agent exists and matches the active_agent
+        if session_key in self._agents:
+            existing_agent = self._agents[session_key]
+            if hasattr(existing_agent, 'agent_name') and existing_agent.agent_name == agent_name:
+                return existing_agent
+            # If agent exists but doesn't match active_agent, remove it
+            del self._agents[session_key]
         
         agent_def = self.agent_registry.get(agent_name)
         if agent_def is None:
@@ -339,7 +344,4 @@ class AgentLoop:
         session = sessions.get_or_create(session_key)
         agent_name = session.metadata.get("active_agent", None)
         logger.info(f"[process_direct] Session metadata: active_agent={agent_name}, metadata={session.metadata}")
-        if "active_agent" in session.metadata:
-            del session.metadata["active_agent"]
-            sessions.save(session)
         return response.content if response else "", agent_name

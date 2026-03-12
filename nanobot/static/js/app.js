@@ -450,6 +450,7 @@ document.body.addEventListener('click', (e) => {
             chatManager.addMessage(`开始 ${address} 的安检`, 'user');
             break;
         }
+
         case 'save-photo-to-node': {
             const nodeId = target.dataset.nodeId;
             photoHandler.savePhotoToNode(nodeId);

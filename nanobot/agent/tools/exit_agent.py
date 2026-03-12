@@ -43,4 +43,20 @@ class ExitAgentTool(Tool):
     async def execute(self, summary: str, **kwargs: Any) -> str:
         self._session.exit_summary = summary
         self._session.status = "exiting"
+        
+        # Clear active_agent in parent session metadata
+        try:
+            from nanobot.session.manager import SessionManager
+            user_workspace = self._session.agent_workspace.parent.parent if self._session.agent_workspace.parent.name == "agents" else None
+            if user_workspace:
+                sessions = SessionManager(user_workspace)
+                session_key = f"{self._session.channel}:{self._session.chat_id}"
+                session = sessions.get_or_create(session_key)
+                if "active_agent" in session.metadata:
+                    del session.metadata["active_agent"]
+                    sessions.save(session)
+        except Exception as e:
+            from loguru import logger
+            logger.warning(f"Failed to clear active_agent: {e}")
+        
         return f"Exiting agent session. Summary: {summary}"

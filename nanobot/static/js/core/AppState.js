@@ -87,11 +87,31 @@ const AppState = {
             this._fallbackFieldsCache = val;
         }
     },
+    
+    // --- Compatibility layer for nextSceneButtonShown ---
+    get nextSceneButtonShown() {
+        if (!this.activeTabId || !this.workTabs[this.activeTabId]) {
+            return this._fallbackNextSceneButtonShown || false;
+        }
+        // Ensure nextSceneButtonShown exists in the tab state
+        if (typeof this.workTabs[this.activeTabId].nextSceneButtonShown === 'undefined') {
+            this.workTabs[this.activeTabId].nextSceneButtonShown = false;
+        }
+        return this.workTabs[this.activeTabId].nextSceneButtonShown;
+    },
+    set nextSceneButtonShown(val) {
+        if (this.activeTabId && this.workTabs[this.activeTabId]) {
+            this.workTabs[this.activeTabId].nextSceneButtonShown = val;
+        } else {
+            this._fallbackNextSceneButtonShown = val;
+        }
+    },
 
     // --- Fallback state (used when no tab is active) ---
     _fallbackWorkState: {},
     _fallbackNodePhotos: {},
     _fallbackFieldsCache: {},
+    _fallbackNextSceneButtonShown: false,
 
     // --- Node definitions (loaded from backend) ---
     nodes: [],               // Array of { id, order, name, purpose, canSkip, requiredFields, optionalFields }
@@ -99,6 +119,8 @@ const AppState = {
 
     // --- Node photos (legacy reference) ---
     currentUploadingNode: null,
+
+    
 
     /**
      * Reset work form state for current active tab.
@@ -115,10 +137,12 @@ const AppState = {
             };
             this.workTabs[this.activeTabId].nodePhotos = {};
             this.workTabs[this.activeTabId].nodeFieldsCache = {};
+            this.workTabs[this.activeTabId].nextSceneButtonShown = false;
         } else {
             this._fallbackWorkState = {};
             this._fallbackNodePhotos = {};
             this._fallbackFieldsCache = {};
+            this._fallbackNextSceneButtonShown = false;
         }
         this.currentUploadingNode = null;
     },
