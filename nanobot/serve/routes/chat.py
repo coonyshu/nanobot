@@ -20,7 +20,7 @@ async def chat(req: ChatRequest, request: Request):
     tenant_pool = request.app.state.tenant_pool
     action_manager = request.app.state.action_manager
 
-    response = await agent_callback(
+    response, _ = await agent_callback(
         req.user_id, req.message,
         svc=svc, tenant_pool=tenant_pool, action_manager=action_manager,
     )

@@ -72,9 +72,7 @@ eventBus.on('auth:logout', () => {
 eventBus.on('ws:connected', () => {
     uiController.onConnected();
     chatManager.addMessage('已连接到 AI 助理', 'system');
-    registerFrontendTools();
 
-    // Enable input listener
     const textInput = document.getElementById('textInput');
     textInput.addEventListener('input', () => {
         const btnSend = document.getElementById('btnSend');
@@ -129,9 +127,14 @@ function _playNextAudio() {
 eventBus.on('ws:message', (msg) => {
     uiController.log('收到: ' + msg.type);
 
+    if (msg.agent_name) {
+        AppState.currentAgentName = msg.agent_name;
+    }
+
     switch (msg.type) {
         case 'hello':
             uiController.log('会话: ' + msg.session_id, 'success');
+            registerFrontendTools();
             break;
         case 'listening':
             uiController.updateStatus('listening', '聆听中...');
@@ -166,16 +169,16 @@ eventBus.on('ws:message', (msg) => {
             break;
         case 'text':
             chatManager.clearThinkingMessage();
-            chatManager.addMessage(msg.text, 'assistant');
+            chatManager.addMessage(msg.text, 'assistant', msg.agent_name);
             break;
         case 'text_chunk':
-            chatManager.addStreamingMessage(msg.chunk, msg.is_first || false);
+            chatManager.addStreamingMessage(msg.chunk, msg.is_first || false, msg.agent_name);
             break;
         case 'thinking_chunk':
-            chatManager.addThinkingStreamingMessage(msg.chunk, msg.is_first || false);
+            chatManager.addThinkingStreamingMessage(msg.chunk, msg.is_first || false, msg.agent_name);
             break;
         case 'text_complete':
-            chatManager.finishStreamingMessage();
+            chatManager.finishStreamingMessage(msg.agent_name);
             break;
         case 'thinking':
             chatManager.addThinkingMessage(msg.text);

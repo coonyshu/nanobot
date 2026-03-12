@@ -630,6 +630,14 @@ class VoiceWebSocketHandler:
                 # Close connection
                 session.stop_event.set()
             
+            elif msg_type == "register_tools":
+                # Register frontend tools
+                descriptors = data.get("descriptors", [])
+                if self.extra_message_handler:
+                    # Forward to extra handler (typically app.py's register_tools handler)
+                    await self.extra_message_handler(session.user_id, data)
+                logger.info(f"Voice WebSocket: registered {len(descriptors)} frontend tools for user={session.user_id}")
+            
             else:
                 # Forward unrecognized messages to extra handler
                 if self.extra_message_handler:
@@ -653,25 +661,30 @@ class VoiceWebSocketHandler:
         # Call agent callback
         if self.agent_callback:
             try:
-                response = await self.agent_callback(session.user_id, text)
+                result = await self.agent_callback(session.user_id, text)
+                
+                # Handle both tuple (response, agent_name) and string response
+                if isinstance(result, tuple):
+                    response, agent_name = result
+                else:
+                    response, agent_name = result, None
+                    
                 if response:
                     # 检查是否已通过流式输出发送过文本
-                    # 如果是流式输出，agent_callback 会设置 _streaming_sent 标记
-                    # 使用 getattr 避免循环导入
                     streaming_sent = getattr(session, '_streaming_sent', False)
-                    if hasattr(session, '_streaming_sent'):
-                        delattr(session, '_streaming_sent')  # 清除标记
+                    response_via_bus = getattr(session, '_response_via_bus', False)
                     
-                    if not streaming_sent:
-                        # 只有在非流式模式下才发送完整的 text 消息
-                        await self._send_message(websocket, MessageType.TEXT, {"text": response})
-                        # 非流式模式下才发送完整文本到TTS队列
+                    if hasattr(session, '_streaming_sent'):
+                        delattr(session, '_streaming_sent')
+                    if hasattr(session, '_response_via_bus'):
+                        delattr(session, '_response_via_bus')
+                    
+                    # If SubAgent is active (agent_name is not None), response was already sent via bus
+                    # Only send via gateway if it's MainAgent response (agent_name is None)
+                    if not streaming_sent and not response_via_bus and not agent_name:
+                        await self._send_message(websocket, MessageType.TEXT, {"text": response, "agent_name": agent_name})
                         await session.tts_text_queue.put(response)
-                    else:
-                        # 流式模式下，文本已经通过 on_stream 回调逐块发送到TTS队列
-                        logger.debug("[Stream] Skipping full text to TTS queue (already sent via chunks)")
             except Exception as e:
-                logger.error(f"Agent callback error: {e}")
                 await self._send_message(websocket, MessageType.ERROR, {"error": str(e)})
         else:
             # Echo mode for testing
@@ -694,7 +707,9 @@ class VoiceWebSocketHandler:
             try:
                 response = await self.agent_image_callback(session.user_id, text, image_b64, mime_type)
                 if response:
-                    await self._send_message(websocket, MessageType.TEXT, {"text": response})
+                    # Get active agent name from session
+                    agent_name = getattr(session, 'active_agent_name', None)
+                    await self._send_message(websocket, MessageType.TEXT, {"text": response, "agent_name": agent_name})
                     await session.tts_text_queue.put(response)
             except Exception as e:
                 logger.error(f"Agent image callback error: {e}")

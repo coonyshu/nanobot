@@ -8,8 +8,8 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.multi_tenant.models import Tenant, TenantConfig, UserConfig
-from nanobot.multi_tenant.workspace_resolver import WorkspaceResolver
+from nanobot.tenant.models import Tenant, TenantConfig, UserConfig
+from nanobot.tenant.workspace_resolver import WorkspaceResolver
 
 
 class TenantStore:
@@ -181,6 +181,9 @@ class TenantStore:
                 base["brave_api_key"] = global_config.tools.web.search.api_key
             base["exec_config"] = global_config.tools.exec
             base["restrict_to_workspace"] = global_config.tools.restrict_to_workspace
+            # Propagate agents_dirs so non-default tenants also discover agents
+            if hasattr(global_config, "agents") and global_config.agents.agents_dirs:
+                base["agents_dirs"] = global_config.agents.agents_dirs
         
         # Apply tenant config_override from tenants.json (legacy)
         if tenant and tenant.config_override:

@@ -276,16 +276,22 @@ def gateway(
     cron_store_path = get_user_data_path() / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
-    # Create agent with cron service
-    agent = AgentLoop(
-        bus=bus,
+    # Determine global agents directory (relative to nanobot package)
+    nanobot_pkg_dir = Path(__file__).parent.parent  # nanobot package directory
+    global_agents_dir = nanobot_pkg_dir.parent.parent / "agents"  # D:\ai\nanobot\agents
+    if not global_agents_dir.is_dir():
+        global_agents_dir = None
+    agents_dirs = [global_agents_dir] if global_agents_dir else None
+
+    # Create agent context and loop
+    from nanobot.agent.agent_context import AgentContext
+    agent_context = AgentContext(
         provider=provider,
         workspace=config.workspace_path,
+        bus=bus,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
@@ -294,7 +300,13 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
+        agents_dirs=agents_dirs,
+    )
+    agent = AgentLoop(
+        agent_context=agent_context,
         channels_config=config.channels,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
     )
 
     # Set cron callback (needs agent)
@@ -517,15 +529,14 @@ def agent(
     else:
         logger.disable("nanobot")
 
-    agent_loop = AgentLoop(
-        bus=bus,
+    from nanobot.agent.agent_context import AgentContext
+    agent_context = AgentContext(
         provider=provider,
         workspace=config.workspace_path,
+        bus=bus,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
         reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=config.tools.web.search.api_key or None,
         web_proxy=config.tools.web.proxy or None,
@@ -533,7 +544,12 @@ def agent(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
+    )
+    agent_loop = AgentLoop(
+        agent_context=agent_context,
         channels_config=config.channels,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on

@@ -9,10 +9,10 @@ from pathlib import Path
 import bcrypt
 from loguru import logger
 
-from nanobot.multi_tenant.models import Tenant, User
-from nanobot.multi_tenant.tenant_store import TenantStore
-from nanobot.multi_tenant.user_store import UserStore
-from nanobot.multi_tenant.workspace_resolver import WorkspaceResolver
+from nanobot.tenant.models import Tenant, User
+from nanobot.tenant.tenant_store import TenantStore
+from nanobot.tenant.user_store import UserStore
+from nanobot.tenant.workspace_resolver import WorkspaceResolver
 
 
 MIGRATION_MARKER = ".migrated"

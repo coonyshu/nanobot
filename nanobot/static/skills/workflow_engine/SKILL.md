@@ -11,26 +11,26 @@ always: true
 
 ## ⚠️ 最高优先级强制规则
 
-> **用户说"开始安检/开始XX安检/重新开始"时，必须立即调用 `workflow_start_task`，禁止用文字替代！**
-> 无论你记忆中是否有任务状态，无论安检单是否已打开，都必须调用 `workflow_start_task`。
+> **用户说"开始安检/开始XX安检/重新开始"时，必须立即调用 `mcp_workflow-engine_workflow_start_task`，禁止用文字替代！**
+> 无论你记忆中是否有任务状态，无论安检单是否已打开，都必须调用 `mcp_workflow-engine_workflow_start_task`。
 > 调用该工具会自动处理一切——打开安检单、恢复节点状态、恢复数据。
 
 ## Workflow Agent 接管机制
 
-当调用 `workflow_start_task` 成功后，Workflow Agent **接管**后续流程控制：
+当调用 `mcp_workflow-engine_workflow_start_task` 成功后，Workflow Agent **接管**后续流程控制：
 ```
 用户: "开始安检"
   ↓
-主 AI: 调用 workflow_start_task()
+主 AI: 调用 mcp_workflow-engine_workflow_start_task()
   ↓
 Workflow Agent: [接管] 自动执行所有底层操作
   ↓
 主 AI: 收到 "_workflow_mode: active" 标记
   ↓
-主 AI: 继续调用 workflow_* 工具（不要调用底层工具）
+主 AI: 继续调用 mcp_workflow-engine_workflow_* 工具（不要调用底层工具）
 ```
 
-**关键信号**：当工具返回包含 `"_workflow_mode": "active"` 时，表示 Workflow Agent 已接管，请继续调用 `workflow_*` 工具。
+**关键信号**：当工具返回包含 `"_workflow_mode": "active"` 时，表示 Workflow Agent 已接管，请继续调用 `mcp_workflow-engine_workflow_*` 工具。
 
 ## 何时调用 Workflow Agent
 
@@ -38,10 +38,10 @@ Workflow Agent: [接管] 自动执行所有底层操作
 
 | 用户意图 | 调用工具 | 示例 |
 |----------|----------|------|
-| 开始新安检 | `workflow_start_task` | "开始滨江小区安检" |
-| 提供字段值 | `workflow_collect_fields` | "U型管，动压2000" |
-| 完成当前节点 | `workflow_complete_node` | "完成" / "下一步" |
-| 查询当前进度 | `workflow_get_status` | "现在在哪一步？" |
+| 开始新安检 | `mcp_workflow-engine_workflow_start_task` | "开始滨江小区安检" |
+| 提供字段值 | `mcp_workflow-engine_workflow_collect_fields` | "U型管，动压2000" |
+| 完成当前节点 | `mcp_workflow-engine_workflow_complete_node` | "完成" / "下一步" |
+| 查询当前进度 | `mcp_workflow-engine_workflow_get_status` | "现在在哪一步？" |
 
 ## 多智能体分工
 
@@ -65,31 +65,31 @@ Workflow Agent: [接管] 自动执行所有底层操作
 用户说"开始XX安检"时：
 
 ```
-步骤1: 地址语义搜索 → 获取 userId
-步骤2: workflow_start_task(user_id=..., address=...)
+步骤1: 地址语义搜索 → 获取 userId (使用 mcp_gas-inspection_search_user)
+步骤2: mcp_workflow-engine_workflow_start_task(user_id=..., address=...)
 步骤3: 播报 Agent 返回的消息给用户
 ```
 
 **注意**：Agent 内部已自动打开安检单和激活首节点，你**不需要**再调用 `work_form_open_form`。
 
-> ⚠️ **关键规则：无论任务是否已在进行中，都必须调用 `workflow_start_task`，不要调用 `workflow_get_status` 代替！**
+> ⚠️ **关键规则：无论任务是否已在进行中，都必须调用 `mcp_workflow-engine_workflow_start_task`，不要调用 `mcp_workflow-engine_workflow_get_status` 代替！**
 >
-> - `workflow_start_task` 内部会自动检查前端安检单是否已打开
+> - `mcp_workflow-engine_workflow_start_task` 内部会自动检查前端安检单是否已打开
 > - 如果安检单**已关闭**（如页面刷新、重新进入），它会自动重新打开并恢复所有节点状态和数据
 > - 如果安检单**已打开**，它会直接继续当前节点，不会重复初始化
 >
 > **错误做法（禁止）**：
 > ```
-> ❌ 检测到任务进行中 → 调用 workflow_get_status → 只用文字播报状态
+> ❌ 检测到任务进行中 → 调用 mcp_workflow-engine_workflow_get_status → 只用文字播报状态
 > ```
 > **正确做法（必须）**：
 > ```
-> ✅ 用户说"开始安检" → 始终调用 workflow_start_task → 安检单自动打开/恢复
+> ✅ 用户说"开始安检" → 始终调用 mcp_workflow-engine_workflow_start_task → 安检单自动打开/恢复
 > ```
 
 ### 2. 采集字段
 
-> ⚠️ **强制规则：用户说出任何字段值时，必须立即调用 `workflow_collect_fields`，不能只用文字回复！**
+> ⚠️ **强制规则：用户说出任何字段值时，必须立即调用 `mcp_workflow-engine_workflow_collect_fields`，不能只用文字回复！**
 >
 > **错误做法（禁止）**：
 > ```
@@ -97,15 +97,15 @@ Workflow Agent: [接管] 自动执行所有底层操作
 > ```
 > **正确做法（必须）**：
 > ```
-> ✅ 用户说"正常入户" → 立即调用 workflow_collect_fields → 播报"已记录"
+> ✅ 用户说"正常入户" → 立即调用 mcp_workflow-engine_workflow_collect_fields → 播报"已记录"
 > ```
 
-> ✅ **字段可以随时覆盖修改**：用户纠正之前的输入时（如"刚才说错了，应该是到访不遇"），直接用新值再次调用 `workflow_collect_fields` 即可，系统会自动覆盖旧值。**禁止以任何理由拒绝修改已记录的字段值。**
+> ✅ **字段可以随时覆盖修改**：用户纠正之前的输入时（如"刚才说错了，应该是到访不遇"），直接用新值再次调用 `mcp_workflow-engine_workflow_collect_fields` 即可，系统会自动覆盖旧值。**禁止以任何理由拒绝修改已记录的字段值。**
 
 用户提供了字段值时（**必须**调用工具，不能只口头确认）：
 
 ```
-workflow_collect_fields(
+mcp_workflow-engine_workflow_collect_fields(
     task_id=当前任务ID,
     node_id=当前节点,
     fields={字段key: 值, ...}
@@ -123,21 +123,21 @@ workflow_collect_fields(
 
 ### 3. 完成节点
 
-> ⚠️ **强制规则：禁止自动切换节点！必须等用户主动说“完成”/“下一步”/“继续”时才能调用 `workflow_complete_node`。**
+> ⚠️ **强制规则：禁止自动切换节点！必须等用户主动说"完成"/"下一步"/"继续"时才能调用 `mcp_workflow-engine_workflow_complete_node`。**
 >
 > 即使所有必填字段已全部填写完成，也禁止自动调用。用户可能还需要拍照、核对或修改。
 >
 > **错误做法（禁止）**：
 > ```
-> ❌ 字段全部填完 → AI自动调用 workflow_complete_node → 切换到下一节点
+> ❌ 字段全部填完 → AI自动调用 mcp_workflow-engine_workflow_complete_node → 切换到下一节点
 > ```
 > **正确做法（必须）**：
 > ```
-> ✅ 字段填完 → 等待用户说"完成"/"下一步"/"继续" → 再调用 workflow_complete_node
+> ✅ 字段填完 → 等待用户说"完成"/"下一步"/"继续" → 再调用 mcp_workflow-engine_workflow_complete_node
 > ```
 
 ```
-workflow_complete_node(
+mcp_workflow-engine_workflow_complete_node(
     task_id=当前任务ID,
     node_id=当前节点,
     fields={当前所有字段值}
@@ -151,7 +151,7 @@ workflow_complete_node(
 
 | 方式 | 结果 |
 |------|------|
-| ✅ 使用 `workflow_start_task` | Agent 自动处理所有操作，返回完整引导语 |
+| ✅ 使用 `mcp_workflow-engine_workflow_start_task` | Agent 自动处理所有操作，返回完整引导语 |
 | ❌ 直接调用 `mcp_workflow-engine_load_workflow_task` + `work_form_open_form` | 需要多次调用，容易遗漏步骤，流程不完整 |
 
 ** Workflow Agent 内部已自动处理**：
@@ -160,17 +160,17 @@ workflow_complete_node(
 - 管理任务状态
 
 ⛔ **不要**直接调用以下工具：
-- `mcp_workflow-engine_load_workflow_task` → 用 `workflow_start_task`
-- `mcp_workflow-engine_transition_to_next_node` → 用 `workflow_complete_node`
+- `mcp_workflow-engine_load_workflow_task` → 用 `mcp_workflow-engine_workflow_start_task`
+- `mcp_workflow-engine_transition_to_next_node` → 用 `mcp_workflow-engine_workflow_complete_node`
 - `work_form_open_form` / `work_form_update_node_status` → Agent 内部自动调用
 
 ## 交互示例
 
 **用户**: "开始滨江小区2期8栋202安检"
-**主 AI**: 调用 `workflow_start_task` → 播报 "已打开安检单，当前在入户门拍照场景..."
+**主 AI**: 调用 `mcp_workflow-engine_workflow_start_task` → 播报 "已打开安检单，当前在入户门拍照场景..."
 
 **用户**: "拍好了，有人在家"
-**主 AI**: 调用 `workflow_collect_fields(fields={photo: "uploaded", visit_type: "正常入户"})` → 播报 "已记录"
+**主 AI**: 调用 `mcp_workflow-engine_workflow_collect_fields(fields={photo: "uploaded", visit_type: "正常入户"})` → 播报 "已记录"
 
 **用户**: "完成"
-**主 AI**: 调用 `workflow_complete_node` → 播报 "已完成入户门拍照，进入查漏检测场景..."
+**主 AI**: 调用 `mcp_workflow-engine_workflow_complete_node` → 播报 "已完成入户门拍照，进入查漏检测场景..."

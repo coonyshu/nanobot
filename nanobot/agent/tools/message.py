@@ -15,11 +15,13 @@ class MessageTool(Tool):
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
+        agent_name: str | None = None,
     ):
         self._send_callback = send_callback
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
+        self._agent_name = agent_name
         self._sent_in_turn: bool = False
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
@@ -97,6 +99,7 @@ class MessageTool(Tool):
             metadata={
                 "message_id": message_id,
             },
+            agent_name=self._agent_name,
         )
 
         try:

@@ -14,6 +14,9 @@ from loguru import logger
 # Context variable: identifies whether execution is inside a subagent
 is_subagent_context: ContextVar[bool] = ContextVar('is_subagent_context', default=False)
 
+# Global ServiceState instance
+_service_state_instance: Optional['ServiceState'] = None
+
 
 class ServiceState:
     """
@@ -31,6 +34,23 @@ class ServiceState:
         self.tab_contexts: Dict[str, dict] = {}
         # Per-user auth info (extracted from JWT on WS connect)
         self.user_auth_info: Dict[str, dict] = {}
+        # Per-user active agent: user_id -> agent_name (None = MainAgent)
+        self.user_active_agent: Dict[str, str | None] = {}
+        # Tenant pool reference (set by app.py after creation)
+        self.tenant_pool: Optional[Any] = None
+        # Default action manager reference (set by app.py after creation)
+        self.action_manager: Optional[Any] = None
+
+    @classmethod
+    def get(cls) -> Optional['ServiceState']:
+        """Get the global ServiceState instance."""
+        return _service_state_instance
+
+    @classmethod
+    def set_instance(cls, instance: 'ServiceState') -> None:
+        """Set the global ServiceState instance."""
+        global _service_state_instance
+        _service_state_instance = instance
 
     # -- voice sessions -------------------------------------------------------
 
@@ -95,6 +115,21 @@ class ServiceState:
 
     def clear_user_auth_info(self, user_id: str):
         self.user_auth_info.pop(user_id, None)
+
+    # -- active agent -----------------------------------------------------------
+
+    def set_user_active_agent(self, user_id: str, agent_name: str | None):
+        """Set the active agent for a user. None = MainAgent."""
+        self.user_active_agent[user_id] = agent_name
+        logger.info("Set active agent for user {}: {}", user_id, agent_name or "MainAgent")
+
+    def get_user_active_agent(self, user_id: str) -> str | None:
+        """Get the active agent for a user. None = MainAgent."""
+        return self.user_active_agent.get(user_id)
+
+    def clear_user_active_agent(self, user_id: str):
+        """Clear the active agent for a user (reset to MainAgent)."""
+        self.user_active_agent.pop(user_id, None)
 
     # -- tab context -----------------------------------------------------------
 

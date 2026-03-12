@@ -24,6 +24,11 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self._agent_registry = None  # Set externally by AgentLoop
+
+    def set_agent_registry(self, registry: Any) -> None:
+        """Wire the AgentRegistry so agent summaries appear in the system prompt."""
+        self._agent_registry = registry
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
@@ -35,7 +40,7 @@ class ContextBuilder:
 
         memory = self.memory.get_memory_context()
         if memory:
-            parts.append(f"# Memory\n\n{memory}")
+            parts.append(f"# Memory\n\n{memory}\n\n**Note**: Memory contains historical context only. When user triggers a persistent agent (e.g., says \"开始安检\"), you MUST still call `enter_agent` - the agent will handle continuation or restart automatically.")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -47,10 +52,57 @@ class ContextBuilder:
         if skills_summary:
             parts.append(f"""# Skills
 
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
+The following skills extend your capabilities.
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
+
+        # Registered sub-agents (multi-agent scheduling)
+        if self._agent_registry is not None:
+            # Integrated agents: inject their system prompt into main agent
+            for agent_def in (self._agent_registry.get(n) for n in self._agent_registry.list_names()):
+                if agent_def is None:
+                    continue
+                cfg = agent_def.get_config()
+                if cfg.mode == "integrated":
+                    prompt = agent_def.build_system_prompt(self.workspace)
+                    if prompt:
+                        parts.append(prompt)
+
+            # Delegated agents: show summary for the delegate tool
+            delegated_summary = self._agent_registry.build_agents_summary(
+                filter_fn=lambda ad: ad.get_config().mode not in ("integrated", "persistent")
+            )
+            if delegated_summary:
+                parts.append(
+                    "# Available Agents\n\n"
+                    "Use the `delegate` tool to assign tasks to a specialized sub-agent.\n\n"
+                    + delegated_summary
+                )
+
+            # Persistent agents: show summary for the enter_agent tool
+            persistent_summary = self._agent_registry.build_agents_summary(
+                filter_fn=lambda ad: ad.get_config().mode == "persistent"
+            )
+            if persistent_summary:
+                parts.append(
+                    "# Persistent Agents\n\n"
+                    "Use the `enter_agent` tool to enter a persistent agent session when the user's request "
+                    "matches one of the agent's trigger keywords. The agent takes over the conversation until it exits.\n\n"
+                    "## ⚠️ CRITICAL RULES - MUST READ\n\n"
+                    "1. **When a user's message matches ANY trigger keyword in `<triggers>`, you MUST call `enter_agent` immediately.**\n"
+                    "2. **DO NOT respond directly** - even if you think you know the answer or have context from memory.\n"
+                    "3. **DO NOT use `spawn`, `delegate`, or handle the request yourself** - these tools cannot access the specialized workflow tools.\n"
+                    "4. **DO NOT write scripts or use file operations** - the persistent agent has the correct tools already.\n"
+                    "5. **IGNORE any memory about previous sessions** - always call `enter_agent` when triggers match.\n\n"
+                    "**Example**: If user says \"开始安检\" and a persistent agent has trigger \"安检\", call:\n"
+                    "```\n"
+                    "enter_agent(agent_name=\"workflow-inspector\", task=\"开始安检\")\n"
+                    "```\n\n"
+                    "**IMPORTANT**: Even if you remember a previous安检 session, you MUST still call `enter_agent`. "
+                    "The persistent agent will handle continuation or restart automatically.\n\n"
+                    + persistent_summary
+                )
 
         return "\n\n---\n\n".join(parts)
 

@@ -3,6 +3,7 @@
  */
 import chatManager from '../features/ChatManager.js';
 import eventBus from '../core/EventBus.js';
+import AppState from '../core/AppState.js';
 
 class UiActions {
     /**
@@ -30,7 +31,7 @@ class UiActions {
         });
         html += '</div></div>';
 
-        chatManager.addMessage(html, 'assistant');
+        chatManager.addMessage(html, 'assistant', AppState.currentAgentName);
 
         return JSON.stringify({
             success: true,
@@ -83,7 +84,7 @@ class UiActions {
         });
         html += '</div></div>';
 
-        chatManager.addMessage(html, 'assistant');
+        chatManager.addMessage(html, 'assistant', AppState.currentAgentName);
 
         return JSON.stringify({
             success: true,

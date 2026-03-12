@@ -95,7 +95,7 @@ include = [
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
     "nanobot/serve/**/*.py",
-    "nanobot/multi_tenant/**/*.py",
+    "nanobot/tenant/**/*.py",
     "nanobot/voice/**/*.py",
     "nanobot/service_tools/**/*.py",
     "nanobot/static/**/*",

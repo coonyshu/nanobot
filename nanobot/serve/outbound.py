@@ -16,10 +16,7 @@ async def consume_outbound_messages(bus, svc: ServiceState):
     try:
         while True:
             msg = await bus.consume_outbound()
-            logger.info(
-                "Outbound message: channel={}, chat_id={}, content={}...",
-                msg.channel, msg.chat_id, msg.content[:50],
-            )
+            logger.info("Outbound: channel={}, chat_id={}", msg.channel, msg.chat_id)
 
             if msg.channel == "voice":
                 user_id = msg.chat_id
@@ -30,8 +27,8 @@ async def consume_outbound_messages(bus, svc: ServiceState):
                     session_obj = session_data.get("session")
 
                     try:
-                        await websocket.send_json({"type": "text", "text": msg.content})
-                        logger.info("Sent text to WebSocket: user={}", user_id)
+                        payload = {"type": "text", "text": msg.content, "agent_name": msg.agent_name}
+                        await websocket.send_json(payload)
 
                         if session_obj and hasattr(session_obj, "tts_text_queue"):
                             await session_obj.tts_text_queue.put(msg.content)

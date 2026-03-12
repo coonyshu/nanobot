@@ -271,6 +271,7 @@ class ActionManager:
           {
             "name": "camera",
             "description": "摄像头控制",
+            "agent": "workflow-inspector",  // 可选，指定工具只对该 subagent 可见
             "methods": {
               "take_photo": {
                 "description": "拍照",
@@ -295,10 +296,12 @@ class ActionManager:
         self._unregister_user_tools(user_id)
 
         registered: list[str] = []
+        agent_tools: dict[str, list[str]] = {}  # agent_name -> tool_names
 
         for desc in descriptors:
             device_name = desc.get("name", "").lower()
             device_desc = desc.get("description", device_name)
+            agent_name = desc.get("agent")  # 可选：指定工具只对该 agent 可见
 
             # 注册方法型工具（控制）
             methods = desc.get("methods", {})
@@ -342,6 +345,10 @@ class ActionManager:
                 self._registry.register(tool)
                 self._dynamic_tools[tool_name] = tool
                 registered.append(tool_name)
+                
+                # 如果指定了 agent，记录到 agent_tools
+                if agent_name:
+                    agent_tools.setdefault(agent_name, []).append(tool_name)
 
             # 注册属性查询工具
             properties_def = desc.get("properties", {})
@@ -370,6 +377,21 @@ class ActionManager:
                 self._registry.register(tool)
                 self._dynamic_tools[tool_name] = tool
                 registered.append(tool_name)
+                
+                # 如果指定了 agent，记录到 agent_tools
+                if agent_name:
+                    agent_tools.setdefault(agent_name, []).append(tool_name)
+
+        # 隐藏指定了 agent 的工具，使其只对 subagent 可见
+        all_agent_tools = []
+        for agent_name, tool_names in agent_tools.items():
+            all_agent_tools.extend(tool_names)
+        
+        if all_agent_tools and self._registry:
+            self._registry.hide_from_llm(*all_agent_tools)
+            logger.info(
+                f"ActionManager: hidden {len(all_agent_tools)} tools from main agent (visible only to subagents): {all_agent_tools}"
+            )
 
         self._user_tools[user_id] = registered
         logger.info(

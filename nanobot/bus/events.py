@@ -34,5 +34,17 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    agent_name: str | None = None
+
+
+@dataclass
+class A2AMessage:
+    """Agent-to-Agent communication message."""
+
+    from_agent: str
+    to_agent: str
+    message: str
+    context: dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=datetime.now)
 
 

@@ -42,24 +42,25 @@ def _make_provider(config):
     )
 
 
-def _create_agent_loop(bus, provider, config, workspace):
+def _create_agent_loop(bus, provider, config, workspace, agents_dirs=None):
     """Create the default AgentLoop."""
+    from nanobot.agent.agent_context import AgentContext
     from nanobot.agent.loop import AgentLoop
 
-    return AgentLoop(
-        bus=bus,
+    agent_context = AgentContext(
         provider=provider,
         workspace=workspace,
+        bus=bus,
         model=config.agents.defaults.model,
         temperature=config.agents.defaults.temperature,
         max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
+        reasoning_effort=config.agents.defaults.reasoning_effort,
         brave_api_key=(
             config.tools.web.search.api_key
             if hasattr(config.tools.web, "search")
             else None
         ),
+        web_proxy=config.tools.web.proxy if hasattr(config.tools.web, "proxy") else None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=(
@@ -67,6 +68,14 @@ def _create_agent_loop(bus, provider, config, workspace):
             if hasattr(config.tools, "mcp_servers")
             else None
         ),
+        agents_dirs=agents_dirs,
+    )
+
+    return AgentLoop(
+        agent_context=agent_context,
+        channels_config=config.channels,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        memory_window=config.agents.defaults.memory_window,
     )
 
 
@@ -123,17 +132,24 @@ def create_app(
         workspace = Path(__file__).parent.parent  # nanobot-fork/nanobot/
     if skills_dir is None:
         skills_dir = data_dir / "skills"
+    
+    global_agents_dir = workspace.parent.parent / "agents"
+    logger.debug("global_agents_dir: {} (is_dir={})", global_agents_dir, global_agents_dir.is_dir() if global_agents_dir.exists() else "N/A")
+    if not global_agents_dir.is_dir():
+        global_agents_dir = None
 
     if agent_loop is None:
-        agent_loop = _create_agent_loop(bus, provider, config, workspace)
+        logger.debug("Creating AgentLoop with agents_dirs={}", [global_agents_dir] if global_agents_dir else None)
+        agent_loop = _create_agent_loop(bus, provider, config, workspace, 
+                                        agents_dirs=[global_agents_dir] if global_agents_dir else None)
         logger.info("AgentLoop initialized with model: {}", config.agents.defaults.model)
 
     # -- Multi-tenant infra ----------------------------------------------------
-    from nanobot.multi_tenant.workspace_resolver import WorkspaceResolver
-    from nanobot.multi_tenant.tenant_store import TenantStore
-    from nanobot.multi_tenant.user_store import UserStore
-    from nanobot.multi_tenant.agent_pool import TenantAgentPool
-    from nanobot.multi_tenant.migration import (
+    from nanobot.tenant.workspace_resolver import WorkspaceResolver
+    from nanobot.tenant.tenant_store import TenantStore
+    from nanobot.tenant.user_store import UserStore
+    from nanobot.tenant.agent_pool import TenantAgentPool
+    from nanobot.tenant.migration import (
         needs_migration, run_migration,
         needs_tenants_dir_migration, run_tenants_dir_migration,
         needs_service_data_migration, run_service_data_migration,
@@ -163,6 +179,7 @@ def create_app(
         tenant_store=tenant_store,
         resolver=resolver,
         global_skills_dir=skills_dir,
+        global_agents_dir=global_agents_dir,
     )
     tenant_pool.register_loop("default", agent_loop, action_manager)
     logger.info("TenantAgentPool created, default tenant loop registered")
@@ -171,6 +188,11 @@ def create_app(
     svc = ServiceState()
     # Allow TenantAgentPool to re-register ws_senders when creating new tenant loops
     tenant_pool._session_registry = svc.active_voice_sessions
+    # Set tenant_pool and action_manager references for global access
+    svc.tenant_pool = tenant_pool
+    svc.action_manager = action_manager
+    # Set global instance
+    ServiceState.set_instance(svc)
 
     from .monkey_patch import setup_monkey_patch
     setup_monkey_patch(agent_loop, tenant_pool, action_manager, svc)
@@ -194,7 +216,7 @@ def create_app(
         if voice_config.enabled and voice_config.validate():
             # Build session register/unregister callbacks that close over svc
             def _make_register_cb():
-                from nanobot.multi_tenant.agent_pool import current_tenant_id as _cti
+                from nanobot.tenant.agent_pool import current_tenant_id as _cti
 
                 def register_cb(user_id, session_id, websocket, session):
                     tid = _cti.get()
@@ -213,7 +235,7 @@ def create_app(
 
             # Extra WS message handler
             async def _handle_extra_ws_message(user_id, data):
-                from nanobot.multi_tenant.agent_pool import current_tenant_id as _cti
+                from nanobot.tenant.agent_pool import current_tenant_id as _cti
 
                 msg_type = data.get("type", "")
                 sid, sd = svc.get_user_session(user_id)

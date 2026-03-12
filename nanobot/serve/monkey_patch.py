@@ -17,12 +17,12 @@ def setup_monkey_patch(agent_loop, tenant_pool, action_manager, svc: ServiceStat
 
     Also sets up the ``before_execute_hook`` and realtime camera callback.
     """
-    from nanobot.multi_tenant.agent_pool import current_tenant_id
+    from nanobot.tenant.agent_pool import current_tenant_id
     from .callbacks import agent_image_callback, send_subagent_message_to_user
 
     # -- Monkey-patch _run_subagent --------------------------------------------
 
-    original_run_subagent = agent_loop.subagents._run_subagent
+    original_run_subagent = agent_loop.agent_context.subagents._run_subagent
 
     async def patched_run_subagent(task_id, task, label, origin):
         original_method = (
@@ -57,7 +57,7 @@ def setup_monkey_patch(agent_loop, tenant_pool, action_manager, svc: ServiceStat
             subagent_module.ToolRegistry = original_registry_class
             is_subagent_context.reset(token)
 
-    agent_loop.subagents._run_subagent = patched_run_subagent
+    agent_loop.agent_context.subagents._run_subagent = patched_run_subagent
     logger.info("Subagent manager patched to inject dynamic tools and set context flag")
 
     # -- Link ToolRegistry to default ActionManager ----------------------------

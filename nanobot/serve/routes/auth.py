@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 
 from loguru import logger
 
-from nanobot.multi_tenant.auth import (
+from nanobot.tenant.auth import (
     create_access_token,
     get_current_user,
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES,

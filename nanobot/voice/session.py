@@ -70,6 +70,9 @@ class VoiceSession:
     # Agent context (for sharing with nanobot)
     agent_context: Dict[str, Any] = field(default_factory=dict)
     
+    # Active agent name (set when entering a persistent agent)
+    active_agent_name: str | None = None
+    
     def reset_audio_states(self):
         """Reset audio buffering states after processing."""
         self.asr_audio_buffer = []

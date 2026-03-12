@@ -56,6 +56,9 @@ class WorkspaceResolver:
     def tenant_skills_dir(self, tenant_id: str) -> Path:
         return self.tenants_dir / tenant_id / "skills"
 
+    def tenant_agents_dir(self, tenant_id: str) -> Path:
+        return self.tenants_dir / tenant_id / "agents"
+
     # ── user paths ──
 
     def user_workspace(self, tenant_id: str, user_id: str) -> Path:
@@ -86,9 +89,9 @@ class WorkspaceResolver:
         """Create tenant directory structure. Returns tenant workspace path."""
         ws = self.tenant_workspace(tenant_id)
         ws.mkdir(parents=True, exist_ok=True)
-        # Also create skills directory
-        skills_dir = self.tenant_skills_dir(tenant_id)
-        skills_dir.mkdir(parents=True, exist_ok=True)
+        # Also create skills and agents directories
+        self.tenant_skills_dir(tenant_id).mkdir(parents=True, exist_ok=True)
+        self.tenant_agents_dir(tenant_id).mkdir(parents=True, exist_ok=True)
         return ws
 
     def ensure_user_dirs(self, tenant_id: str, user_id: str) -> Path:

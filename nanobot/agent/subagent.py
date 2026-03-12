@@ -1,26 +1,25 @@
 """Subagent manager for background task execution."""
 
 import asyncio
-import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.web import WebSearchTool, WebFetchTool
-from nanobot.agent.tools.message import MessageTool
+
+if TYPE_CHECKING:
+    from nanobot.agent.agent_context import AgentContext
+    from nanobot.agent.agent_def import AgentDefinition, ModelOverride
+    from nanobot.config.schema import ExecToolConfig
 
 
 class SubagentManager:
@@ -40,7 +39,7 @@ class SubagentManager:
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig as _ETC
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
@@ -50,10 +49,10 @@ class SubagentManager:
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
-        self.exec_config = exec_config or ExecToolConfig()
+        self.exec_config = exec_config or _ETC()
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
-        self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._session_tasks: dict[str, set[str]] = {}
 
     async def spawn(
         self,
@@ -94,93 +93,40 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
     ) -> None:
-        """Execute the subagent task and announce the result."""
+        """Execute the subagent task using AgentLoop."""
+        from nanobot.agent.agent_context import AgentContext
+        from nanobot.agent.loop import AgentLoop
+        
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
         try:
-            # Build subagent tools (including message tool for notifications)
-            tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                path_append=self.exec_config.path_append,
-            ))
-            tools.register(WebSearchTool(api_key=self.brave_api_key))
-            tools.register(WebFetchTool())
-            
-            # 添加 message 工具，使 subagent 能够发送消息（用于提醒等场景）
-            # 从 origin 中获取 channel 和 chat_id
-            channel = origin.get("channel", "")
-            chat_id = origin.get("chat_id", "")
-            tools.register(MessageTool(
-                send_callback=self.bus.publish_outbound,
-                default_channel=channel,
-                default_chat_id=chat_id,
-            ))
-            
+            tools = self._build_tools(origin)
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
 
-            # Run agent loop (limited iterations)
-            max_iterations = 15
-            iteration = 0
-            final_result: str | None = None
+            agent_context = AgentContext.create_simple(
+                provider=self.provider,
+                workspace=self.workspace,
+                bus=self.bus,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                reasoning_effort=self.reasoning_effort,
+                brave_api_key=self.brave_api_key,
+                web_proxy=self.web_proxy,
+                exec_config=self.exec_config,
+                restrict_to_workspace=self.restrict_to_workspace,
+            )
+            agent_context.tools = tools
+            loop = AgentLoop(
+                agent_context=agent_context,
+                max_iterations=15,
+            )
 
-            while iteration < max_iterations:
-                iteration += 1
-
-                response = await self.provider.chat(
-                    messages=messages,
-                    tools=tools.get_definitions(),
-                    model=self.model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    reasoning_effort=self.reasoning_effort,
-                )
-
-                if response.has_tool_calls:
-                    # Add assistant message with tool calls
-                    tool_call_dicts = [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                            },
-                        }
-                        for tc in response.tool_calls
-                    ]
-                    messages.append({
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": tool_call_dicts,
-                    })
-
-                    # Execute tools
-                    for tool_call in response.tool_calls:
-                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                        logger.info("Subagent [{}] executing tool: {}({})", task_id, tool_call.name, args_str[:200])
-                        result = await tools.execute(tool_call.name, tool_call.arguments)
-                        logger.info("Subagent [{}] tool result: {}", task_id, result[:200] if isinstance(result, str) else result)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_call.name,
-                            "content": result,
-                        })
-                else:
-                    final_result = response.content
-                    break
+            final_result, _, _ = await loop.run(messages)
 
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
@@ -192,6 +138,29 @@ class SubagentManager:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
+
+    def _build_tools(self, origin: dict[str, str]) -> ToolRegistry:
+        """Build tools for subagent."""
+        tools = ToolRegistry()
+        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(ExecTool(
+            working_dir=str(self.workspace),
+            timeout=self.exec_config.timeout,
+            restrict_to_workspace=self.restrict_to_workspace,
+            path_append=self.exec_config.path_append,
+        ))
+        tools.register(WebSearchTool(api_key=self.brave_api_key))
+        tools.register(WebFetchTool())
+        tools.register(MessageTool(
+            send_callback=self.bus.publish_outbound,
+            default_channel=origin.get("channel", ""),
+            default_chat_id=origin.get("chat_id", ""),
+        ))
+        return tools
 
     async def _announce_result(
         self,
@@ -214,7 +183,6 @@ Result:
 
 Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not mention technical details like "subagent" or task IDs."""
 
-        # Inject as system message to trigger main agent
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
@@ -229,13 +197,12 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
-        from datetime import datetime
         import time as _time
         import platform as _platform
         
         time_ctx = ContextBuilder._build_runtime_context(None, None)
         tz = _time.strftime("%Z") or "UTC"
-        os_name = _platform.system()  # 'Windows', 'Linux', 'Darwin' (macOS)
+        os_name = _platform.system()
 
         parts = [f"""# Subagent
 
@@ -270,3 +237,61 @@ Stay focused on the assigned task. Your final response will be reported back to 
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
+
+    async def spawn_agent(
+        self,
+        agent_def: "AgentDefinition",
+        task: str,
+        label: str | None = None,
+        origin_channel: str = "cli",
+        origin_chat_id: str = "direct",
+        session_key: str | None = None,
+        parent_tools: ToolRegistry | None = None,
+        config_overrides: "ModelOverride | None" = None,
+    ) -> str:
+        """Spawn a registered agent definition as a background task."""
+        from nanobot.agent.agent import Agent
+
+        task_id = str(uuid.uuid4())[:8]
+        cfg = agent_def.get_config()
+        display_label = label or cfg.name
+        origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+
+        async def _run() -> None:
+            try:
+                result = await Agent.run_one_shot(
+                    agent_def=agent_def,
+                    provider=self.provider,
+                    workspace=self.workspace,
+                    bus=self.bus,
+                    parent_tools=parent_tools or ToolRegistry(),
+                    task=task,
+                    channel=origin_channel,
+                    chat_id=origin_chat_id,
+                    default_model=self.model,
+                    default_temperature=self.temperature,
+                    default_max_tokens=self.max_tokens,
+                    default_reasoning_effort=self.reasoning_effort,
+                    config_override=config_overrides,
+                )
+                await self._announce_result(task_id, display_label, task, result, origin, "ok")
+            except Exception as e:
+                logger.error("Agent subagent [{}] failed: {}", display_label, e)
+                await self._announce_result(task_id, display_label, task, str(e), origin, "error")
+
+        bg_task = asyncio.create_task(_run())
+        self._running_tasks[task_id] = bg_task
+        if session_key:
+            self._session_tasks.setdefault(session_key, set()).add(task_id)
+
+        def _cleanup(_: asyncio.Task) -> None:
+            self._running_tasks.pop(task_id, None)
+            if session_key and (ids := self._session_tasks.get(session_key)):
+                ids.discard(task_id)
+                if not ids:
+                    del self._session_tasks[session_key]
+
+        bg_task.add_done_callback(_cleanup)
+
+        logger.info("Spawned agent subagent [{}]: {}", task_id, display_label)
+        return f"Agent [{display_label}] started (id: {task_id}). I'll notify you when it completes."

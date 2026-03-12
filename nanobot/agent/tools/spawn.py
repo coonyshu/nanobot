@@ -32,7 +32,10 @@ class SpawnTool(Tool):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done."
+            "The subagent will complete the task and report back when done.\n\n"
+            "**IMPORTANT**: Do NOT use spawn for tasks that match a persistent agent's trigger keywords. "
+            "Check the system prompt for available persistent agents and their triggers. "
+            "If the user's request matches a trigger, use `enter_agent` instead."
         )
 
     @property

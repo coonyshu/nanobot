@@ -13,10 +13,8 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
 
-from nanobot.multi_tenant.tenant_store import TenantStore
-from nanobot.multi_tenant.workspace_resolver import WorkspaceResolver
-
-# ── context vars (set per-request, read by tool callbacks) ──
+from nanobot.tenant.tenant_store import TenantStore
+from nanobot.tenant.workspace_resolver import WorkspaceResolver
 
 current_tenant_id: ContextVar[str] = ContextVar("current_tenant_id", default="default")
 current_user_id: ContextVar[str] = ContextVar("current_user_id", default="")
@@ -50,6 +48,7 @@ class TenantAgentPool:
         tenant_store: TenantStore,
         resolver: WorkspaceResolver,
         global_skills_dir: Path,
+        global_agents_dir: Path | None = None,
         default_action_manager: Any = None,
         session_registry: dict | None = None,
     ) -> None:
@@ -59,6 +58,7 @@ class TenantAgentPool:
         self._tenant_store = tenant_store
         self._resolver = resolver
         self._global_skills_dir = global_skills_dir
+        self._global_agents_dir = global_agents_dir
         self._default_action_manager = default_action_manager
         self._session_registry = session_registry
 
@@ -66,13 +66,8 @@ class TenantAgentPool:
         self._pool_lock = asyncio.Lock()
         self._user_locks: dict[str, asyncio.Lock] = {}
 
-        # Per-tenant ActionManager instances – imported lazily to avoid circular deps
         self._action_managers: dict[str, Any] = {}
-
-        # Per-tenant PluginLoader instances
         self._plugin_loaders: dict[str, Any] = {}
-
-    # ── pool management ──
 
     async def get_or_create_loop(self, tenant_id: str) -> AgentLoop:
         """Return (or lazily create) the :class:`AgentLoop` for *tenant_id*."""
@@ -86,6 +81,7 @@ class TenantAgentPool:
 
             tenant_ws = self._resolver.ensure_tenant_dirs(tenant_id)
             cfg = self._tenant_store.get_agent_config(tenant_id, self._global_config)
+            logger.debug("Tenant '{}' config: agents_dirs={}", tenant_id, cfg.get("agents_dirs"))
 
             if not cfg.get("model"):
                 raise ModelNotConfiguredError(
@@ -95,23 +91,35 @@ class TenantAgentPool:
                     f"  租户级: ~/.nanobots/tenants/{tenant_id}/config.json"
                 )
 
-            loop = AgentLoop(
-                bus=self._bus,
+            from nanobot.agent.agent_context import AgentContext
+            agent_context = AgentContext(
                 provider=self._provider,
                 workspace=tenant_ws,
+                bus=self._bus,
                 model=cfg.get("model"),
                 temperature=cfg.get("temperature", 0.1),
                 max_tokens=cfg.get("max_tokens", 4096),
-                max_iterations=cfg.get("max_tool_iterations", 40),
-                memory_window=cfg.get("memory_window", 100),
                 brave_api_key=cfg.get("brave_api_key"),
                 exec_config=cfg.get("exec_config"),
                 restrict_to_workspace=cfg.get("restrict_to_workspace", False),
                 mcp_servers=cfg.get("mcp_servers"),
+                agents_dirs=cfg.get("agents_dirs"),
+            )
+            loop = AgentLoop(
+                agent_context=agent_context,
+                max_iterations=cfg.get("max_tool_iterations", 40),
+                memory_window=cfg.get("memory_window", 100),
             )
 
             # Merge global base skills into the tenant's SkillsLoader
             loop.context.skills.additional_skills_dirs = [self._global_skills_dir]
+
+            # Merge global agents dir into the tenant's AgentRegistry
+            if self._global_agents_dir:
+                loop.agent_registry.add_extra_dir(self._global_agents_dir)
+                # Re-run agent tool registration to pick up newly discovered agents
+                # (EnterAgentTool, DelegateTool, integrated tools)
+                loop._register_agent_tools()
             logger.info(
                 "Created AgentLoop for tenant '{}': workspace={}, model={}",
                 tenant_id, tenant_ws, cfg.get("model"),
@@ -179,6 +187,11 @@ class TenantAgentPool:
         if self._global_skills_dir not in loop.context.skills.additional_skills_dirs:
             loop.context.skills.additional_skills_dirs.insert(0, self._global_skills_dir)
 
+        # Ensure global agents dir is included (same as get_or_create_loop)
+        if self._global_agents_dir:
+            loop.agent_registry.add_extra_dir(self._global_agents_dir)
+            loop._register_agent_tools()
+
         # Load plugins from tenant + system skill directories
         from nanobot.agent.plugins import PluginLoader
         tenant_skills = self._resolver.tenant_skills_dir(tenant_id)
@@ -194,6 +207,12 @@ class TenantAgentPool:
             self._action_managers[tenant_id] = action_mgr
         logger.info("Registered external AgentLoop for tenant '{}'", tenant_id)
 
+    # ── active agent query ─────────────────────────────────────────────────
+
+    def get_active_agent(self, tenant_id: str, session_key: str) -> str | None:
+        """Get the active agent name for a session, or None if MainAgent is active."""
+        return None
+
     # ── per-user processing ──
 
     async def process_for_user(
@@ -206,7 +225,7 @@ class TenantAgentPool:
         chat_id: str,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """Process a message on behalf of *user_id* in *tenant_id*.
 
         - Acquires a per-user lock so that concurrent requests from the same
@@ -216,6 +235,9 @@ class TenantAgentPool:
         - Loads user-level config (channels, agent prefs) — available via
           ``self._tenant_store.get_user_config(tenant_id, user_id)``.
         - Injects the user-specific workspace for memory & session isolation.
+        
+        Returns:
+            tuple: (response_content, agent_name) where agent_name is None for MainAgent
         """
         # Early config validation — runs even for pre-registered loops.
         cfg = self._tenant_store.get_agent_config(tenant_id, self._global_config)
@@ -242,13 +264,13 @@ class TenantAgentPool:
                 "```"
             )
             logger.warning("Model not configured for tenant '{}': {}", tenant_id, msg)
-            return msg
+            return msg, None
 
         try:
             loop = await self.get_or_create_loop(tenant_id)
         except ModelNotConfiguredError as e:
             logger.warning("Model not configured for tenant '{}': {}", tenant_id, e)
-            return str(e)
+            return str(e), None
 
         user_ws = self._resolver.ensure_user_dirs(tenant_id, user_id)
 

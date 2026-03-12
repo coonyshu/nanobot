@@ -43,10 +43,10 @@ async def agent_callback(
     ``svc``, ``tenant_pool``, and ``action_manager`` are injected from
     ``app.state`` at the call site.
     """
-    from nanobot.multi_tenant.agent_pool import current_tenant_id
+    from nanobot.tenant.agent_pool import current_tenant_id
 
     try:
-        logger.info("Agent processing: user={}, message={}", user_id, message)
+        logger.info("[MainAgent] processing: user={}, message={}", user_id, message)
 
         # Set frontend action tool user context
         tenant_id = current_tenant_id.get()
@@ -84,12 +84,13 @@ async def agent_callback(
         # Stream callback
         on_stream_callback = None
         _, cur_session_data = svc.get_user_session(user_id)
+        logger.info("[Stream] enable_streaming={}, cur_session_data={}", enable_streaming, cur_session_data is not None)
         if enable_streaming and cur_session_data:
             collected_text = ""
             session_obj = cur_session_data.get("session")
             show_thinking = getattr(session_obj, "show_thinking", True) if session_obj else True
 
-            async def on_stream(chunk: str, *, is_first: bool = False, reasoning: bool = False):
+            async def on_stream(chunk: str, *, is_first: bool = False, reasoning: bool = False, agent_name: str | None = None):
                 nonlocal collected_text
                 try:
                     _, sd = svc.get_user_session(user_id)
@@ -102,12 +103,14 @@ async def agent_callback(
                                 "type": "thinking_chunk",
                                 "chunk": chunk,
                                 "is_first": is_first,
+                                "agent_name": agent_name,
                             })
                     else:
                         await websocket.send_json({
                             "type": "text_chunk",
                             "chunk": chunk,
                             "is_first": is_first,
+                            "agent_name": agent_name,
                         })
                         collected_text += chunk
                 except Exception as e:
@@ -119,7 +122,7 @@ async def agent_callback(
 
         logger.info("Calling tenant_pool.process_for_user for tenant={}, user={}...", tenant_id, user_id)
 
-        response = await tenant_pool.process_for_user(
+        response, agent_name = await tenant_pool.process_for_user(
             tenant_id=tenant_id,
             user_id=user_id,
             content=enriched_message,
@@ -129,35 +132,75 @@ async def agent_callback(
             on_progress=on_progress,
             on_stream=on_stream_callback,
         )
+        logger.info("[AgentCallback] process_for_user returned: agent_name={}, response_len={}", 
+                    agent_name, len(response) if response else 0)
 
-        logger.info("Agent response: {}", response if response else "empty")
+        preview = response[:100] if response else "empty"
+        logger.info("[AgentCallback] response from agent (agent_name={}, response_len={}): {}", 
+                    agent_name, len(response) if response else 0, preview)
 
-        # Send stream completion signal
+        # Check if SubAgent was active based on returned agent_name
+        # If agent_name is not None, SubAgent processed the message and response was already sent via bus
+        if agent_name:
+            logger.info("[AgentCallback] SubAgent '{}' active, response sent via bus/outbound", agent_name)
+            # Set active agent name in voice session
+            sid, voice_session = svc.get_user_session(user_id)
+            if voice_session:
+                session_obj = voice_session.get("session")
+                if session_obj:
+                    session_obj.active_agent_name = agent_name
+            return response or "抱歉，我没有得到有效的回复。", agent_name
+
+        # MainAgent response - check if there's an active voice session
+        sid, voice_session = svc.get_user_session(user_id)
+        if voice_session:
+            # Voice mode: agent loop sends responses via bus -> outbound.py
+            # Set a marker so gateway knows not to send duplicate message
+            session_obj = voice_session.get("session")
+            if session_obj:
+                session_obj._response_via_bus = True
+                session_obj.active_agent_name = None  # Clear active agent (MainAgent)
+            # Don't send WebSocket messages here to avoid duplicates
+            logger.info("[AgentCallback] Voice mode active, response sent via bus/outbound")
+            return response or "抱歉，我没有得到有效的回复。", agent_name
+
+        # Chat mode: send response directly via callback return
         _, final_session_data = svc.get_user_session(user_id)
+        logger.info("[AgentCallback] final_session_data found: {}", final_session_data is not None)
         if enable_streaming and on_stream_callback and final_session_data:
+            logger.info("[AgentCallback] Sending stream completion signal (agent_name={}, response_len={})", 
+                       agent_name, len(response) if response else 0)
             try:
                 websocket = final_session_data["websocket"]
                 session_obj = final_session_data.get("session")
 
-                if "collected_text" in dir() and collected_text.strip():
-                    if session_obj and hasattr(session_obj, "tts_text_queue"):
-                        await session_obj.tts_text_queue.put(collected_text.strip())
-                elif response:
-                    await websocket.send_json({"type": "clear_thinking"})
+                # Send clear_thinking first
+                await websocket.send_json({"type": "clear_thinking"})
+                
+                # Send the full response text if available
+                if response:
                     await websocket.send_json({
                         "type": "text_chunk",
                         "chunk": response,
                         "is_first": True,
+                        "agent_name": agent_name,
                     })
-                    if session_obj and hasattr(session_obj, "tts_text_queue"):
-                        await session_obj.tts_text_queue.put(response)
-
-                await websocket.send_json({"type": "text_complete"})
+                    
+                # Send text_complete with agent_name - frontend will update avatar
+                await websocket.send_json({"type": "text_complete", "agent_name": agent_name})
+                logger.info("[AgentCallback] Stream completion signal sent")
+                
+                # Also send full text to TTS queue
+                if response and session_obj and hasattr(session_obj, "tts_text_queue"):
+                    await session_obj.tts_text_queue.put(response)
+                
                 if session_obj:
                     session_obj._streaming_sent = True
             except Exception as e:
                 logger.warning("Failed to send stream complete: {}", e)
         else:
+            logger.info("[AgentCallback] No stream completion: enable_streaming={}, on_stream_callback={}, final_session_data={}",
+                       enable_streaming, on_stream_callback is not None, final_session_data is not None)
             _, clear_session_data = svc.get_user_session(user_id)
             if clear_session_data:
                 try:
@@ -166,11 +209,11 @@ async def agent_callback(
                 except Exception as e:
                     logger.warning("Failed to send clear_thinking signal: {}", e)
 
-        return response or "抱歉，我没有得到有效的回复。"
+        return response or "抱歉，我没有得到有效的回复。", agent_name
 
     except Exception as e:
-        logger.error("Agent error: {}", e, exc_info=True)
-        return "抱歉，我遇到了一些问题，请稍后再试。"
+        logger.error("Agent error: {} (type: {})", e, type(e).__name__, exc_info=True)
+        return "抱歉，我遇到了一些问题，请稍后再试。", None
 
 
 async def agent_image_callback(
@@ -243,7 +286,7 @@ async def send_subagent_message_to_user(user_id: str, message: str, *, svc: Serv
         session = session_data["session"]
 
         await websocket.send_json({"type": "text", "text": message})
-        logger.info("Sent subagent message to user {}: {}...", user_id, message[:50])
+        logger.info("[SubAgent] sent message to user {}: {}...", user_id, message[:50])
 
         await session.tts_text_queue.put(message)
     except Exception as e:

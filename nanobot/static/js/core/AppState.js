@@ -29,6 +29,7 @@ const AppState = {
     streamingText: '',
     currentThinkingStreamMessage: null,
     showThinkingProcess: localStorage.getItem('showThinkingProcess') !== 'false',
+    currentAgentName: null,
 
     // --- Camera ---
     cameraStream: null,

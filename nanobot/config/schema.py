@@ -233,10 +233,23 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
 
 
+class AgentOverrideConfig(Base):
+    """Per-agent LLM configuration overrides (applied via config.json)."""
+
+    model: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    max_iterations: int | None = None
+    reasoning_effort: str | None = None
+    enabled: bool = True
+
+
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    agent_overrides: dict[str, AgentOverrideConfig] = Field(default_factory=dict)
+    agents_dirs: list[str] = Field(default_factory=list)  # Extra directories to scan for agent definitions
 
 
 class ProviderConfig(Base):

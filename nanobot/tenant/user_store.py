@@ -11,8 +11,8 @@ from typing import Any
 import bcrypt
 from loguru import logger
 
-from nanobot.multi_tenant.models import User
-from nanobot.multi_tenant.workspace_resolver import WorkspaceResolver
+from nanobot.tenant.models import User
+from nanobot.tenant.workspace_resolver import WorkspaceResolver
 
 
 class UserStore:

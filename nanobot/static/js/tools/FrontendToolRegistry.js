@@ -104,6 +104,7 @@ const FRONTEND_DESCRIPTORS = [
     {
         name: "work_form",
         description: "工单业务表单操作（支持安检/挂表/点火/工程等多种工作类型）",
+        agent: "workflow-inspector",
         methods: {
             open_form: {
                 description: "打开指定用户的工作表单，显示用户信息、警告提示和场景列表",
@@ -151,12 +152,20 @@ const FRONTEND_DESCRIPTORS = [
             get_status: {
                 description: "查询当前安检单界面是否已打开。返回 is_open=true 表示安检单已显示在设备屏幕上；is_open=false 表示安检单未打开或已关闭，需要调用 open_form 重新打开。",
                 parameters: {}
+            },
+            restore_node_photos: {
+                description: "恢复场景照片（从后端持久化的远程URL），在任务恢复时显示之前上传的照片",
+                parameters: {
+                    node_id: { type: "string", description: "场景ID", required: true },
+                    photo_urls: { type: "array", description: "照片URL列表", required: true }
+                }
             }
         }
     },
     {
         name: "tab",
         description: "工作区页签管理，支持多任务并行，每个安检任务对应一个独立页签",
+        agent: "workflow-inspector",
         properties: {
             activeTabId: {
                 type: "string",
