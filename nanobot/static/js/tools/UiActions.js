@@ -110,6 +110,42 @@ class UiActions {
         const selectedText = `选择了地址: ${addressInfo.address}（用户号: ${addressInfo.userId}）`;
         eventBus.emit('ui:send_text', selectedText);
     }
+
+    /**
+     * Show photo action buttons (take photo / upload photo).
+     */
+    async showPhotoActions(params) {
+        const { prompt } = params;
+
+        let html = '<div class="chat-photo-actions">';
+        if (prompt) html += `<div class="chat-photo-prompt">${prompt}</div>`;
+        html += `
+            <button class="chat-photo-btn" data-action="chat-take-photo">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                </svg>
+                拍照
+            </button>
+            <button class="chat-photo-btn" data-action="chat-upload-photo">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                上传
+            </button>
+        `;
+        html += '</div>';
+
+        chatManager.addMessage(html, 'assistant', AppState.currentAgentName);
+
+        return JSON.stringify({
+            success: true,
+            message: '已显示拍照和上传按钮',
+            instruction: 'STOP_AND_WAIT_FOR_USER_INPUT'
+        });
+    }
 }
 
 export default new UiActions();

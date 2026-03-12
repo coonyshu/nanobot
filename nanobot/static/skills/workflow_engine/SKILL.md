@@ -27,10 +27,21 @@ Workflow Agent: [接管] 自动执行所有底层操作
   ↓
 主 AI: 收到 "_workflow_mode: active" 标记
   ↓
-主 AI: 继续调用 mcp_workflow-engine_workflow_* 工具（不要调用底层工具）
+主 AI: 直接播报 Agent 返回的消息（不要修改、不要生成新内容）
 ```
 
-**关键信号**：当工具返回包含 `"_workflow_mode": "active"` 时，表示 Workflow Agent 已接管，请继续调用 `mcp_workflow-engine_workflow_*` 工具。
+**关键信号**：当工具返回包含 `"_workflow_mode": "active"` 时，表示 Workflow Agent 已接管。
+
+> ⚠️ **强制规则：收到 "_workflow_mode": "active" 标记时，必须直接播报 Agent 返回的消息，禁止修改或生成新内容！**
+>
+> **错误做法（禁止）**：
+> ```
+> ❌ 收到 "_workflow_mode": "active" → AI自己生成新内容 → "请拍摄入户门照片，需要我帮您拍照吗？"
+> ```
+> **正确做法（必须）**：
+> ```
+> ✅ 收到 "_workflow_mode": "active" → 直接播报 Agent 返回的消息 → "✅ **安检任务已恢复！**\n\n**当前信息：**\n- 📍 地址：当涂开发区滨江小区二期（1）8幢0202室\n- 👤 用户编号：1500160273\n- 📋 当前节点：入户门拍照\n\n**当前状态：**\n- ⏳ 门牌号：待填写（可选）\n- ✅ 入户方式：到访不遇\n- ⏳ 入户门照片：待拍摄（必填）\n\n**请完成以下操作：**\n1. 📸 拍摄入户门照片（必填）\n2. 📝 填写门牌号（可选）\n\n完成后说"完成"或"下一步"，我会帮您进入下一个检查场景。"
+> ```
 
 ## 何时调用 Workflow Agent
 

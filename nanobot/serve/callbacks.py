@@ -149,6 +149,17 @@ async def agent_callback(
                 session_obj = voice_session.get("session")
                 if session_obj:
                     session_obj.active_agent_name = agent_name
+                    
+                    # Parse workflow agent response to extract show_photo_buttons
+                    try:
+                        import json
+                        if isinstance(response, str) and response.strip().startswith('{'):
+                            parsed = json.loads(response)
+                            if isinstance(parsed, dict) and "show_photo_buttons" in parsed:
+                                session_obj.agent_context["show_photo_buttons"] = parsed["show_photo_buttons"]
+                                logger.info("[AgentCallback] extracted show_photo_buttons={} from workflow agent response", parsed["show_photo_buttons"])
+                    except Exception as e:
+                        logger.warning("[AgentCallback] failed to parse workflow agent response: {}", e)
             return response or "抱歉，我没有得到有效的回复。", agent_name
 
         # MainAgent response - check if there's an active voice session

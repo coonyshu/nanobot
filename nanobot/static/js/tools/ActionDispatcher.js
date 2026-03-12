@@ -22,6 +22,7 @@ class ActionDispatcher {
             'ui_show_alert': (p) => uiActions.showAlert(p),
             'ui_show_address_selector': (p) => uiActions.showAddressSelector(p),
             'ui_show_choices': (p) => uiActions.showChoices(p),
+            'ui_show_photo_actions': (p) => uiActions.showPhotoActions(p),
             // Generalized: work_form_* replaces work_*
             'work_form_open_form': (p) => workFormActions.openForm(p),
             'work_form_update_node_status': (p) => workFormActions.updateNodeStatus(p),
@@ -52,6 +53,7 @@ class ActionDispatcher {
             'ui_show_alert': '显示提醒',
             'ui_show_address_selector': '显示地址选择',
             'ui_show_choices': '显示选项',
+            'ui_show_photo_actions': '显示拍照和上传按钮',
             'work_form_open_form': '打开工作表单',
             'work_form_update_node_status': '更新场景状态',
             'work_form_update_node_fields': '更新场景字段',

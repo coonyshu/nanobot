@@ -4,6 +4,7 @@ to the appropriate WebSocket connections.
 """
 
 import asyncio
+import json
 
 from loguru import logger
 
@@ -28,6 +29,14 @@ async def consume_outbound_messages(bus, svc: ServiceState):
 
                     try:
                         payload = {"type": "text", "text": msg.content, "agent_name": msg.agent_name}
+                        
+                        # Check if metadata contains show_photo_buttons
+                        if msg.metadata and "show_photo_buttons" in msg.metadata:
+                            payload["show_photo_buttons"] = msg.metadata["show_photo_buttons"]
+                        # Also check session agent_context for show_photo_buttons (set by enter_agent)
+                        elif session_obj and hasattr(session_obj, "agent_context") and "show_photo_buttons" in session_obj.agent_context:
+                            payload["show_photo_buttons"] = session_obj.agent_context["show_photo_buttons"]
+                        
                         await websocket.send_json(payload)
 
                         if session_obj and hasattr(session_obj, "tts_text_queue"):

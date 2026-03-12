@@ -217,6 +217,26 @@ class EnterAgentTool(Tool):
         
         try:
             reply = await agent_instance.process_message(task)
+            
+            # Parse workflow agent response to extract show_photo_buttons
+            show_photo_buttons = None
+            try:
+                if isinstance(reply, str) and reply.strip().startswith('{'):
+                    import json
+                    parsed = json.loads(reply)
+                    if isinstance(parsed, dict) and "show_photo_buttons" in parsed:
+                        show_photo_buttons = parsed["show_photo_buttons"]
+                        logger.info("EnterAgentTool: extracted show_photo_buttons={} from workflow agent response", show_photo_buttons)
+            except Exception as e:
+                logger.warning("EnterAgentTool: failed to parse workflow agent response: {}", e)
+            
+            # Store show_photo_buttons in VoiceSession agent_context for later use
+            if show_photo_buttons is not None and self._sessions:
+                main_session = self._sessions.get_or_create(self._session_key)
+                main_session.metadata["show_photo_buttons"] = show_photo_buttons
+                self._sessions.save(main_session)
+                logger.info("EnterAgentTool: stored show_photo_buttons={} in session metadata", show_photo_buttons)
+            
             return reply
         except Exception as e:
             await self._agent_pool.release(self._session_key)

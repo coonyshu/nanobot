@@ -170,6 +170,9 @@ eventBus.on('ws:message', (msg) => {
         case 'text':
             chatManager.clearThinkingMessage();
             chatManager.addMessage(msg.text, 'assistant', msg.agent_name);
+            if (msg.show_photo_buttons) {
+                chatManager.addPhotoButtonsToLastMessage();
+            }
             break;
         case 'text_chunk':
             chatManager.addStreamingMessage(msg.chunk, msg.is_first || false, msg.agent_name);
@@ -179,6 +182,9 @@ eventBus.on('ws:message', (msg) => {
             break;
         case 'text_complete':
             chatManager.finishStreamingMessage(msg.agent_name);
+            if (msg.show_photo_buttons) {
+                chatManager.addPhotoButtonsToLastMessage();
+            }
             break;
         case 'thinking':
             chatManager.addThinkingMessage(msg.text);

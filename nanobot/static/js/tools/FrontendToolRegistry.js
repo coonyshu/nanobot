@@ -98,6 +98,12 @@ const FRONTEND_DESCRIPTORS = [
                     prompt: { type: "string", description: "提示文本，显示在按钮上方", required: true },
                     choices: { type: "array", description: "选项列表，每个元素为字符串", required: true }
                 }
+            },
+            show_photo_actions: {
+                description: "在聊天对话中显示拍照和上传按钮，让用户选择拍照或上传照片。调用此工具后必须立即结束当前响应，禁止继续调用其他工具。用户点击后会自动触发相应的拍照或上传操作。",
+                parameters: {
+                    prompt: { type: "string", description: "提示文本，显示在按钮上方", required: true }
+                }
             }
         }
     },
