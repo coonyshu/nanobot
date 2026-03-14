@@ -168,6 +168,20 @@ async def connect_mcp_servers(
                 logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
 
             logger.info("MCP server '{}': connected, {} tools registered", name, len(tools.tools))
+            
+            # Hide low-level workflow-engine MCP tools from LLM (use high-level workflow_* tools instead)
+            if name == "workflow-engine":
+                low_level_tools = [
+                    "mcp_workflow-engine_transition_to_next_node",
+                    "mcp_workflow-engine_load_workflow_task",
+                    "mcp_workflow-engine_cancel_workflow_task",
+                    "mcp_workflow-engine_update_node_data",
+                    "mcp_workflow-engine_check_node_completion",
+                    "mcp_workflow-engine_skip_node",
+                    "mcp_workflow-engine_jump_to_node",
+                ]
+                registry.hide_from_llm(*low_level_tools)
+                logger.info("MCP server '{}': hidden {} low-level tools from LLM", name, len(low_level_tools))
         except asyncio.TimeoutError:
             logger.error("MCP server '{}': connection timed out, skipping", name)
         except Exception as e:
