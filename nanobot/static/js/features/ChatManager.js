@@ -186,7 +186,7 @@ class ChatManager {
         const actions = document.createElement('div');
         actions.className = 'chat-photo-actions';
         actions.innerHTML = `
-            <div class="chat-photo-prompt">请拍摄或上传照片</div>
+            <div class="chat-photo-prompt">拍照或上传：</div>
             <button class="chat-photo-btn" data-action="chat-take-photo">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>

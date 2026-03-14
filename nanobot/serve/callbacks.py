@@ -2,12 +2,11 @@
 Agent callback functions — called by voice/chat handlers.
 """
 
-import base64
-import tempfile
-from pathlib import Path
+import json
 
 from loguru import logger
 
+from .context_resolver import ContextResolver
 from .state import ServiceState
 
 
@@ -52,6 +51,7 @@ async def agent_callback(
         tenant_id = current_tenant_id.get()
         tenant_action_mgr = tenant_pool.get_action_manager_safe(tenant_id) or action_manager
         tenant_action_mgr.set_user_context(user_id)
+        resolver = ContextResolver(svc, tenant_pool)
 
         # Inject auth + tab context
         auth_prefix = svc.build_auth_context_prefix(user_id)
@@ -83,6 +83,7 @@ async def agent_callback(
 
         # Stream callback
         on_stream_callback = None
+        stream_text_sent = False
         _, cur_session_data = svc.get_user_session(user_id)
         logger.info("[Stream] enable_streaming={}, cur_session_data={}", enable_streaming, cur_session_data is not None)
         if enable_streaming and cur_session_data:
@@ -91,7 +92,7 @@ async def agent_callback(
             show_thinking = getattr(session_obj, "show_thinking", True) if session_obj else True
 
             async def on_stream(chunk: str, *, is_first: bool = False, reasoning: bool = False, agent_name: str | None = None):
-                nonlocal collected_text
+                nonlocal collected_text, stream_text_sent
                 try:
                     _, sd = svc.get_user_session(user_id)
                     if not sd:
@@ -113,6 +114,7 @@ async def agent_callback(
                             "agent_name": agent_name,
                         })
                         collected_text += chunk
+                        stream_text_sent = True
                 except Exception as e:
                     logger.warning("Failed to send stream chunk: {}", e)
 
@@ -143,16 +145,17 @@ async def agent_callback(
         # If agent_name is not None, SubAgent processed the message and response was already sent via bus
         if agent_name:
             logger.info("[AgentCallback] SubAgent '{}' active, response sent via bus/outbound", agent_name)
-            # Set active agent name in voice session
-            sid, voice_session = svc.get_user_session(user_id)
+            resolver.set_active_agent(user_id, agent_name)
+            resolved_ctx = resolver.resolve(user_id)
+            sid, voice_session = resolved_ctx.session_id, resolved_ctx.session_data
+            active_tenant_id = resolved_ctx.tenant_id or tenant_id
             if voice_session:
+                websocket = voice_session["websocket"]
                 session_obj = voice_session.get("session")
+                show_photo_buttons = None
                 if session_obj:
                     session_obj.active_agent_name = agent_name
-                    
-                    # Parse workflow agent response to extract show_photo_buttons
                     try:
-                        import json
                         if isinstance(response, str) and response.strip().startswith('{'):
                             parsed = json.loads(response)
                             if isinstance(parsed, dict) and "show_photo_buttons" in parsed:
@@ -160,6 +163,73 @@ async def agent_callback(
                                 logger.info("[AgentCallback] extracted show_photo_buttons={} from workflow agent response", parsed["show_photo_buttons"])
                     except Exception as e:
                         logger.warning("[AgentCallback] failed to parse workflow agent response: {}", e)
+                    show_photo_buttons = session_obj.agent_context.get("show_photo_buttons")
+                    if show_photo_buttons is None:
+                        try:
+                            from nanobot.session.manager import SessionManager
+                            user_ws = tenant_pool._resolver.ensure_user_dirs(active_tenant_id, user_id)
+                            user_sessions = SessionManager(user_ws)
+                            sess = user_sessions.get_or_create(f"voice:{user_id}")
+                            show_photo_buttons = sess.metadata.get("show_photo_buttons")
+                            logger.info("[AgentCallback] Loaded show_photo_buttons={} from persistent session metadata", show_photo_buttons)
+                            if show_photo_buttons is not None:
+                                session_obj.agent_context["show_photo_buttons"] = show_photo_buttons
+                        except Exception as e:
+                            logger.warning("[AgentCallback] failed to load show_photo_buttons from session metadata: {}", e)
+
+                    # Last resort: if still None, try to query Workflow Runner directly (in-process fallback)
+                    if show_photo_buttons is None and agent_name and "workflow" in agent_name:
+                        try:
+                            from nanobot_agent_workflow_agent.tools import get_runner
+                            
+                            # Get runner for current tenant
+                            runner = get_runner(active_tenant_id)
+                            if runner.current_node_id:
+                                current_node_data = runner.collected_data.get(runner.current_node_id, {})
+                                if runner._should_show_photo_buttons(runner.current_node_id, current_node_data):
+                                    show_photo_buttons = True
+                                    session_obj.agent_context["show_photo_buttons"] = True
+                                    logger.info("[AgentCallback] Retrieved show_photo_buttons=True directly from WorkflowRunner (fallback)")
+                        except ImportError:
+                            # Try relative import if installed as package
+                            try:
+                                from agents.workflow_agent.tools import get_runner
+                                runner = get_runner(active_tenant_id)
+                                if runner.current_node_id:
+                                    current_node_data = runner.collected_data.get(runner.current_node_id, {})
+                                    if runner._should_show_photo_buttons(runner.current_node_id, current_node_data):
+                                        show_photo_buttons = True
+                                        session_obj.agent_context["show_photo_buttons"] = True
+                                        logger.info("[AgentCallback] Retrieved show_photo_buttons=True directly from WorkflowRunner (fallback)")
+                            except Exception as e:
+                                logger.debug("[AgentCallback] Failed to import/query WorkflowRunner: {}", e)
+                        except Exception as e:
+                            logger.warning("[AgentCallback] Failed to query WorkflowRunner directly: {}", e)
+
+                    if enable_streaming and on_stream_callback:
+                        try:
+                            await websocket.send_json({"type": "clear_thinking"})
+                            if not stream_text_sent and response:
+                                await websocket.send_json({
+                                    "type": "text_chunk",
+                                    "chunk": response,
+                                    "is_first": True,
+                                    "agent_name": agent_name,
+                                })
+                            complete_payload = {"type": "text_complete", "agent_name": agent_name}
+                            if show_photo_buttons is not None:
+                                complete_payload["show_photo_buttons"] = show_photo_buttons
+                            await websocket.send_json(complete_payload)
+                            if response and hasattr(session_obj, "tts_text_queue"):
+                                await session_obj.tts_text_queue.put(response)
+                            session_obj._streaming_sent = True
+                            logger.info(
+                                "[AgentCallback] sent subagent stream completion, stream_text_sent={}",
+                                stream_text_sent,
+                            )
+                        except Exception as e:
+                            logger.warning("[AgentCallback] failed to send subagent stream completion: {}", e)
+
             return response or "抱歉，我没有得到有效的回复。", agent_name
 
         # MainAgent response - check if there's an active voice session
@@ -171,6 +241,7 @@ async def agent_callback(
             if session_obj:
                 session_obj._response_via_bus = True
                 session_obj.active_agent_name = None  # Clear active agent (MainAgent)
+            resolver.clear_active_agent(user_id)
             # Don't send WebSocket messages here to avoid duplicates
             logger.info("[AgentCallback] Voice mode active, response sent via bus/outbound")
             return response or "抱歉，我没有得到有效的回复。", agent_name
@@ -235,54 +306,12 @@ async def agent_image_callback(
     *,
     provider,
     model: str,
-) -> str:
-    """Image recognition callback (LLM-only, no full agent loop)."""
-    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}
-    suffix = ext_map.get(mime_type, ".jpg")
-    tmp_path = None
+    svc: ServiceState = None,
+) -> tuple[str, str | None]:
+    from nanobot.agent.image_processor import AgentImageProcessor
 
-    try:
-        prompt = message or "请描述这张图片的内容"
-        logger.info("Agent image processing: user={}, prompt={}", user_id, prompt)
-
-        image_data = base64.b64decode(image_b64)
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(image_data)
-            tmp_path = tmp.name
-
-        system_prompt = (
-            "你是一个图片识别助手。请根据用户的问题和要求来回复：\n"
-            "- 如果用户要求简洁回答（如\"只回答有人/没有人\"），请严格按要求回复，不要添加额外内容\n"
-            "- 如果用户要求详细描述，请提供完整的图片分析\n"
-            "- 如果用户没有明确要求，请简洁准确地回答问题\n"
-            "- 如果用户要求在回复末尾输出JSON代码块，请严格按照指定格式输出，确保JSON语法正确；"
-            "无法识别的字段填null，布尔值用true/false，数字不加引号"
-        )
-
-        content_parts = [
-            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
-            {"type": "text", "text": prompt},
-        ]
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": content_parts},
-        ]
-
-        response = await provider.chat(messages=messages, tools=[], model=model, temperature=0.7)
-        result = response.content or "抱歉，我无法识别这张图片。"
-        logger.info("Agent image response: {}", result)
-        return result
-
-    except Exception as e:
-        logger.error("Agent image error: {}", e, exc_info=True)
-        return "抱歉，图片识别遇到了一些问题，请稍后再试。"
-    finally:
-        if tmp_path:
-            try:
-                Path(tmp_path).unlink(missing_ok=True)
-            except Exception:
-                pass
+    processor = AgentImageProcessor(provider=provider, model=model, svc=svc)
+    return await processor.process(user_id, message, image_b64, mime_type)
 
 
 async def send_subagent_message_to_user(user_id: str, message: str, *, svc: ServiceState):

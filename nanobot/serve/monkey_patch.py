@@ -91,9 +91,10 @@ def setup_monkey_patch(agent_loop, tenant_pool, action_manager, svc: ServiceStat
             cfg = _lc()
             response = await agent_image_callback(
                 user_id, prompt, image_b64, mime_type,
-                provider=agent_loop.provider, model=cfg.agents.defaults.model,
+                provider=agent_loop.provider, model=cfg.agents.defaults.model, svc=svc,
             )
-            await send_subagent_message_to_user(user_id, response, svc=svc)
+            text_response = response[0] if isinstance(response, tuple) else response
+            await send_subagent_message_to_user(user_id, text_response, svc=svc)
         except Exception as e:
             logger.error("Realtime camera callback error: {}", e, exc_info=True)
 

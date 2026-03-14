@@ -183,25 +183,35 @@ class WorkFormManager {
 
         // Check if tab already exists for this user
         const existingTabId = tabManager.getworkTabId(userId);
+        let forceReopen = false;
+
         if (existingTabId) {
-            // Activate existing tab
-            tabManager.activateTab(existingTabId);
-            // If resuming, ensure taskId is updated in currentWorkState (for photo upload)
-            if (resume && taskData?.task_id) {
-                if (AppState.currentWorkState) {
-                    AppState.currentWorkState.taskId = taskData.task_id;
-                    eventBus.emit('log', { msg: `更新当前任务ID: ${taskData.task_id}`, type: 'info' });
-                } else {
-                    // Re-initialize work state with taskId
-                    this._restoreWorkState(userId, workType, address, taskData);
-                }
+            // Check if we are switching tasks (e.g. reset)
+            if (resume && taskData?.task_id && AppState.currentWorkState?.taskId !== taskData.task_id) {
+                console.log(`[open] Task ID changed (${AppState.currentWorkState?.taskId} -> ${taskData.task_id}), forcing reopen.`);
+                forceReopen = true;
             }
-            eventBus.emit('log', { msg: `工作表单已打开，切换到已有页签: userId=${userId}`, type: 'info' });
-            return JSON.stringify({
-                success: true, userId, workType, address,
-                message: `${workType}表单已打开，继续当前任务`,
-                alreadyOpen: true
-            });
+
+            if (!forceReopen) {
+                // Activate existing tab
+                tabManager.activateTab(existingTabId);
+                // If resuming, ensure taskId is updated in currentWorkState (for photo upload)
+                if (resume && taskData?.task_id) {
+                    if (AppState.currentWorkState) {
+                        AppState.currentWorkState.taskId = taskData.task_id;
+                        eventBus.emit('log', { msg: `更新当前任务ID: ${taskData.task_id}`, type: 'info' });
+                    } else {
+                        // Re-initialize work state with taskId
+                        this._restoreWorkState(userId, workType, address, taskData);
+                    }
+                }
+                eventBus.emit('log', { msg: `工作表单已打开，切换到已有页签: userId=${userId}`, type: 'info' });
+                return JSON.stringify({
+                    success: true, userId, workType, address,
+                    message: `${workType}表单已打开，继续当前任务`,
+                    alreadyOpen: true
+                });
+            }
         }
 
         // Save for reopening

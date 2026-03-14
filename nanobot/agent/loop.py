@@ -194,7 +194,7 @@ class AgentLoop:
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=response,
             metadata=msg.metadata or {},
-            agent_name=agent.agent_name if hasattr(agent, 'agent_name') else None,
+            agent_name=session.metadata.get("active_agent") or (agent.agent_name if hasattr(agent, 'agent_name') else None),
         )
 
     async def _handle_system_message(

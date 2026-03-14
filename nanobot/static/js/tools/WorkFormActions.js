@@ -11,13 +11,27 @@ class WorkFormActions {
      * Open work form (idempotent).
      */
     async openForm(params) {
-        const { userId, workType, address, task_id, warnings, meterInfo, debtInfo, scheduleInfo, name } = params;
+        const { userId, workType, address, task_id, warnings, meterInfo, debtInfo, scheduleInfo, name, 
+            collected_data, node_states, current_node, user_info } = params;
         console.log('[openForm] params.task_id=', task_id);
         // If task_id is provided, we're resuming an existing task
         const isResume = !!task_id;
+        
+        const taskData = isResume ? { 
+            task_id,
+            collected_data: collected_data || {},
+            node_states: node_states || {},
+            current_node: current_node || null,
+            user_info: user_info || {},
+            warnings: warnings || [],
+            meter_info: meterInfo || {},
+            debt_info: debtInfo || {},
+            schedule_info: scheduleInfo || {}
+        } : null;
+
         return workFormManager.open(userId, workType, address, {
             resume: isResume,
-            taskData: isResume ? { task_id } : null,
+            taskData: taskData,
             warnings: warnings || [],
             meterInfo: meterInfo || {},
             debtInfo: debtInfo || {},

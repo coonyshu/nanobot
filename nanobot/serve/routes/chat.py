@@ -20,11 +20,11 @@ async def chat(req: ChatRequest, request: Request):
     tenant_pool = request.app.state.tenant_pool
     action_manager = request.app.state.action_manager
 
-    response, _ = await agent_callback(
+    response, agent_name = await agent_callback(
         req.user_id, req.message,
         svc=svc, tenant_pool=tenant_pool, action_manager=action_manager,
     )
-    return ChatResponse(response=response, user_id=req.user_id)
+    return ChatResponse(response=response, user_id=req.user_id, agent_name=agent_name)
 
 
 @router.post("/image", response_model=ImageChatResponse)
@@ -46,9 +46,10 @@ async def image_chat(
 
     provider = request.app.state.provider
     model = request.app.state.nanobot_config.agents.defaults.model
+    svc = request.app.state.svc
 
-    response = await agent_image_callback(
+    response, agent_name = await agent_image_callback(
         user_id, message, image_b64, mime_type,
-        provider=provider, model=model,
+        provider=provider, model=model, svc=svc,
     )
-    return ImageChatResponse(response=response, user_id=user_id)
+    return ImageChatResponse(response=response, user_id=user_id, agent_name=agent_name)

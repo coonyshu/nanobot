@@ -78,7 +78,7 @@ class PhotoHandler {
 
             const el = document.getElementById('imageStatus');
             if (el) el.querySelector('.bubble').textContent = '已识别';
-            chatManager.addMessage(data.response, 'assistant');
+            chatManager.addMessage(data.response, 'assistant', data.agent_name || null);
 
             // Work photo: check validity and auto-save
             if (isWorkPhoto && ws.userId) {

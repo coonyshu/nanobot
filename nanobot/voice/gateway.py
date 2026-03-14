@@ -720,11 +720,18 @@ class VoiceWebSocketHandler:
 
         if self.agent_image_callback:
             try:
-                response = await self.agent_image_callback(session.user_id, text, image_b64, mime_type)
+                result = await self.agent_image_callback(session.user_id, text, image_b64, mime_type)
+                if isinstance(result, tuple):
+                    response, agent_name = result
+                else:
+                    response, agent_name = result, None
                 if response:
-                    # Get active agent name from session
-                    agent_name = getattr(session, 'active_agent_name', None)
-                    await self._send_message(websocket, MessageType.TEXT, {"text": response, "agent_name": agent_name})
+                    active_agent_name = agent_name or getattr(session, "active_agent_name", None)
+                    await self._send_message(
+                        websocket,
+                        MessageType.TEXT,
+                        {"text": response, "agent_name": active_agent_name},
+                    )
                     await session.tts_text_queue.put(response)
             except Exception as e:
                 logger.error(f"Agent image callback error: {e}")

@@ -37,9 +37,12 @@ class MCPToolWrapper(Tool):
     async def execute(self, **kwargs: Any) -> str:
         from mcp import types
 
+        _CALLBACK_KEYS = {"on_stream", "on_progress", "callback"}
+        tool_args = {k: v for k, v in kwargs.items() if k not in _CALLBACK_KEYS}
+
         try:
             result = await asyncio.wait_for(
-                self._session.call_tool(self._original_name, arguments=kwargs),
+                self._session.call_tool(self._original_name, arguments=tool_args),
                 timeout=self._tool_timeout,
             )
         except asyncio.TimeoutError:

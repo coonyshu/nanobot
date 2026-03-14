@@ -52,7 +52,14 @@ class ToolRegistry:
         return [tool.to_schema() for name, tool in self._tools.items()
                 if name not in self._hidden]
 
-    async def execute(self, name: str, params: dict[str, Any], *, internal: bool = False) -> str:
+    async def execute(
+        self,
+        name: str,
+        params: dict[str, Any],
+        *,
+        internal: bool = False,
+        **extra_kwargs: Any,
+    ) -> str:
         """Execute a tool by name with given parameters.
 
         Args:
@@ -80,7 +87,7 @@ class ToolRegistry:
             errors = tool.validate_params(params)
             if errors:
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
-            result = await tool.execute(**params)
+            result = await tool.execute(**params, **extra_kwargs)
             if isinstance(result, str) and result.startswith("Error"):
                 return result + _HINT
             return result

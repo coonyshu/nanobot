@@ -148,6 +148,10 @@ class AgentLoop:
                         "name": tc.name,
                         "content": result,
                     })
+                    if self._is_takeover_handoff(tc.name, result):
+                        final_content = self._extract_takeover_message(result)
+                        messages.append({"role": "assistant", "content": final_content})
+                        return final_content, tools_used, messages
 
                 if check_exit and check_exit():
                     final_content = (get_exit_summary() if get_exit_summary else None) or "Session ended."
@@ -254,13 +258,17 @@ class AgentLoop:
                     args_str = json.dumps(tc.arguments, ensure_ascii=False)
                     logger.info("[Agent:{}] tool: {}({})",
                                 self.agent_name, tc.name, args_str[:200])
-                    result = await self.tools.execute(tc.name, tc.arguments)
+                    result = await self.tools.execute(tc.name, tc.arguments, on_stream=on_stream)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "name": tc.name,
                         "content": result,
                     })
+                    if self._is_takeover_handoff(tc.name, result):
+                        final_content = self._extract_takeover_message(result)
+                        messages.append({"role": "assistant", "content": final_content})
+                        return final_content, tools_used, messages
 
                 if check_exit and check_exit():
                     final_content = (get_exit_summary() if get_exit_summary else None) or "Session ended."
@@ -304,6 +312,35 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}...")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    @staticmethod
+    def _parse_result_payload(result: Any) -> dict[str, Any] | None:
+        if not isinstance(result, str):
+            return None
+        text = result.strip()
+        if not text.startswith("{"):
+            return None
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _is_takeover_handoff(self, tool_name: str, result: Any) -> bool:
+        if tool_name == "enter_agent":
+            return True
+        payload = self._parse_result_payload(result)
+        return bool(payload and payload.get("_workflow_mode") == "active")
+
+    def _extract_takeover_message(self, result: Any) -> str:
+        payload = self._parse_result_payload(result)
+        if payload:
+            message = payload.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+        if isinstance(result, str):
+            return result
+        return str(result)
 
 
 SubAgentLoop = AgentLoop

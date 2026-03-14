@@ -290,7 +290,7 @@ def create_app(
             async def voice_agent_img_cb(user_id, message, image_b64, mime_type="image/jpeg"):
                 return await _agent_img_cb(
                     user_id, message, image_b64, mime_type,
-                    provider=provider, model=config.agents.defaults.model,
+                    provider=provider, model=config.agents.defaults.model, svc=svc,
                 )
 
             voice_handler = VoiceWebSocketHandler(

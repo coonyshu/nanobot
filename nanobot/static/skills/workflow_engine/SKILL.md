@@ -14,6 +14,9 @@ always: true
 > **用户说"开始安检/开始XX安检/重新开始"时，必须立即调用 `mcp_workflow-engine_workflow_start_task`，禁止用文字替代！**
 > 无论你记忆中是否有任务状态，无论安检单是否已打开，都必须调用 `mcp_workflow-engine_workflow_start_task`。
 > 调用该工具会自动处理一切——打开安检单、恢复节点状态、恢复数据。
+>
+> **输出规范（必须）**：给用户的回复只能是业务内容，禁止输出任何内部控制提示或协议说明。
+> 例如禁止输出：`[Workflow Agent Active]`、`workflow_* tools`、`low-level tools`、`tool routing` 等内部语句。
 
 ## Workflow Agent 接管机制
 

@@ -277,7 +277,12 @@ class Agent:
         
         return final_content
     
-    async def enter_child_agent(self, agent_name: str, task: str) -> str:
+    async def enter_child_agent(
+        self,
+        agent_name: str,
+        task: str,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+    ) -> str:
         """Enter a child agent.
         
         Args:
@@ -339,7 +344,7 @@ class Agent:
                      self.agent_name, agent_name)
         
         try:
-            response = await child.process_message(task)
+            response = await child.process_message(task, on_stream=on_stream)
             return response
         finally:
             # Clear active_agent if child session is exiting

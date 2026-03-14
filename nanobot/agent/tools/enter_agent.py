@@ -140,13 +140,19 @@ class EnterAgentTool(Tool):
         """Execute the tool to enter a sub-agent session."""
         logger.info("[EnterAgentTool.execute] agent_name={}, task={}, user_workspace={}", 
                     agent, task[:50], self._user_workspace)
+        on_stream = kwargs.get("on_stream")
         
         if self._agent_instance is not None:
-            return await self._execute_via_agent_instance(agent, task)
+            return await self._execute_via_agent_instance(agent, task, on_stream=on_stream)
         
-        return await self._execute_via_registry(agent, task)
+        return await self._execute_via_registry(agent, task, on_stream=on_stream)
 
-    async def _execute_via_agent_instance(self, agent_name: str, task: str) -> str:
+    async def _execute_via_agent_instance(
+        self,
+        agent_name: str,
+        task: str,
+        on_stream: Any = None,
+    ) -> str:
         """Execute using the parent Agent instance."""
         parent = self._agent_instance
         if parent is None:
@@ -159,9 +165,14 @@ class EnterAgentTool(Tool):
             self._sessions.save(main_session)
             logger.info("EnterAgentTool: set active_agent='{}' in session {}", agent_name, self._session_key)
         
-        return await parent.enter_child_agent(agent_name, task)
+        return await parent.enter_child_agent(agent_name, task, on_stream=on_stream)
 
-    async def _execute_via_registry(self, agent_name: str, task: str) -> str:
+    async def _execute_via_registry(
+        self,
+        agent_name: str,
+        task: str,
+        on_stream: Any = None,
+    ) -> str:
         """Execute using the registry and pool."""
         if self._registry is None:
             return "Error: Agent registry not configured."
@@ -216,7 +227,7 @@ class EnterAgentTool(Tool):
                     agent_name, self._session_key)
         
         try:
-            reply = await agent_instance.process_message(task)
+            reply = await agent_instance.process_message(task, on_stream=on_stream)
             
             # Parse workflow agent response to extract show_photo_buttons
             show_photo_buttons = None
